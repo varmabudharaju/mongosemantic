@@ -16,6 +16,12 @@ from mongosemantic.state.job_queue import (
     fail,
     reset_failed,
 )
+from mongosemantic.state.resume_tokens import (
+    load_polling_watermark,
+    load_resume_token,
+    save_polling_watermark,
+    save_resume_token,
+)
 
 __all__ = [
     "CollectionConfig",
@@ -32,4 +38,8 @@ __all__ = [
     "fail",
     "reset_failed",
     "count_by_status",
+    "save_resume_token",
+    "load_resume_token",
+    "save_polling_watermark",
+    "load_polling_watermark",
 ]
