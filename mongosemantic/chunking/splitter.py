@@ -13,11 +13,28 @@ class ChunkConfig:
     chunk_size_tokens: int = 512
     overlap_tokens: int = 64
 
+    def __post_init__(self) -> None:
+        if self.chunk_size_tokens <= 0:
+            raise ValueError("chunk_size_tokens must be positive")
+        if self.overlap_tokens < 0:
+            raise ValueError("overlap_tokens must be non-negative")
+        if self.overlap_tokens >= self.chunk_size_tokens:
+            raise ValueError("overlap_tokens must be less than chunk_size_tokens")
+
 def _split_sentences(text: str) -> list[str]:
     parts = _SENTENCE_END.split(text.strip())
     return [p for p in parts if p]
 
 def chunk_text(text: str, config: ChunkConfig) -> list[str]:
+    """Split `text` into overlapping chunks at sentence boundaries.
+
+    Returns an empty list for empty/whitespace-only input.
+    A single sentence that exceeds `config.chunk_size_tokens` is emitted as
+    one oversize chunk rather than split mid-sentence — downstream embedders
+    may choose to truncate or reject. Token counts are estimated as len/4,
+    which is an English-text heuristic; real tokenization happens in the
+    embedding provider.
+    """
     if not text or not text.strip():
         return []
     sentences = _split_sentences(text)

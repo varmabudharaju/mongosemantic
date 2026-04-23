@@ -1,3 +1,5 @@
+import pytest
+
 from mongosemantic.chunking.splitter import ChunkConfig, chunk_text
 
 
@@ -32,3 +34,26 @@ def test_chunks_respect_sentence_boundaries():
     out = chunk_text(text, ChunkConfig(chunk_size_tokens=5, overlap_tokens=0))
     for chunk in out[:-1]:
         assert chunk.rstrip().endswith((".", "!", "?"))
+
+
+def test_oversize_sentence_emitted_as_single_chunk():
+    # A sentence larger than chunk_size should be emitted unsplit, not dropped.
+    big = "a" * 4000 + "."  # ~1000 estimated tokens
+    out = chunk_text(big, ChunkConfig(chunk_size_tokens=100, overlap_tokens=0))
+    assert len(out) == 1
+    assert len(out[0]) >= 4000
+
+
+def test_config_rejects_non_positive_chunk_size():
+    with pytest.raises(ValueError, match="chunk_size_tokens must be positive"):
+        ChunkConfig(chunk_size_tokens=0, overlap_tokens=0)
+
+
+def test_config_rejects_negative_overlap():
+    with pytest.raises(ValueError, match="overlap_tokens must be non-negative"):
+        ChunkConfig(chunk_size_tokens=100, overlap_tokens=-1)
+
+
+def test_config_rejects_overlap_ge_chunk_size():
+    with pytest.raises(ValueError, match="overlap_tokens must be less than chunk_size_tokens"):
+        ChunkConfig(chunk_size_tokens=50, overlap_tokens=50)
