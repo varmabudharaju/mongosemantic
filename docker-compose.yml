@@ -2,6 +2,9 @@ services:
   mongo-rs-0:
     image: mongo:7.0
     container_name: mongosemantic-rs-0
+    # IMPORTANT: host port must equal container port because rs.initiate
+    # advertises host "localhost:27117". If these are changed, clients
+    # connecting from the host will be redirected to an unreachable address.
     ports: ["27117:27117"]
     command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27117"]
     healthcheck:
@@ -12,14 +15,20 @@ services:
 
   mongo-rs-init:
     image: mongo:7.0
-    depends_on: [mongo-rs-0]
+    depends_on:
+      mongo-rs-0:
+        condition: service_healthy
     restart: "no"
     entrypoint: ["bash", "-c"]
     command: >
-      "sleep 5 && mongosh --host mongo-rs-0 --port 27117 --eval '
-      rs.initiate({_id: \"rs0\", members: [
-        {_id: 0, host: \"localhost:27117\"}
-      ]})'"
+      "mongosh --host mongo-rs-0 --port 27117 --quiet --eval '
+      try {
+        rs.status();
+      } catch (e) {
+        rs.initiate({_id: \"rs0\", members: [
+          {_id: 0, host: \"localhost:27117\"}
+        ]});
+      }'"
 
   mongo-standalone:
     image: mongo:7.0
