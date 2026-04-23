@@ -11,10 +11,12 @@ class Topology(str, Enum):
     REPLICA_SET = "replica_set"
     STANDALONE = "standalone"
 
-def detect_topology(client: MongoClient, uri: str) -> Topology:
+def detect_topology(
+    client: MongoClient, uri: str, hello_info: dict | None = None
+) -> Topology:
     if ".mongodb.net" in uri:
         return Topology.ATLAS
-    info = client.admin.command("hello")
+    info = hello_info if hello_info is not None else client.admin.command("hello")
     if info.get("setName") or info.get("msg") == "isdbgrid":
         return Topology.REPLICA_SET
     return Topology.STANDALONE
@@ -29,12 +31,12 @@ class MongoConnection:
     @classmethod
     def open(cls, uri: str, database_name: str) -> MongoConnection:
         client = MongoClient(uri, serverSelectionTimeoutMS=5000)
-        client.admin.command("hello")  # forces connect
+        info = client.admin.command("hello")  # single call, reused by detect_topology
         return cls(
             client=client,
             uri=uri,
             database_name=database_name,
-            topology=detect_topology(client, uri),
+            topology=detect_topology(client, uri, hello_info=info),
         )
 
     @property

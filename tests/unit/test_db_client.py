@@ -27,3 +27,18 @@ def test_detect_standalone():
     c = _hello()
     t = detect_topology(c, uri="mongodb://localhost:27017")
     assert t == Topology.STANDALONE
+
+def test_open_propagates_connection_failure(monkeypatch):
+    """If the initial hello fails, MongoConnection.open() must propagate, not swallow."""
+    from unittest.mock import MagicMock, patch
+
+    from pymongo.errors import ServerSelectionTimeoutError
+
+    from mongosemantic.db.client import MongoConnection
+
+    fake_client = MagicMock()
+    fake_client.admin.command.side_effect = ServerSelectionTimeoutError("cluster unreachable")
+    with patch("mongosemantic.db.client.MongoClient", return_value=fake_client):
+        import pytest
+        with pytest.raises(ServerSelectionTimeoutError):
+            MongoConnection.open("mongodb://bogus:27017", "db")
