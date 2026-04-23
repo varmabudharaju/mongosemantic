@@ -1,0 +1,38 @@
+from __future__ import annotations
+
+import typer
+from dotenv import load_dotenv
+
+app = typer.Typer(
+    help="Zero-config semantic search for any MongoDB database.",
+    add_completion=False,
+    no_args_is_help=True,
+)
+
+load_dotenv()  # pick up .env if present
+
+from mongosemantic.commands import apply as _apply_mod  # noqa: E402
+from mongosemantic.commands import index as _index_mod  # noqa: E402
+from mongosemantic.commands import inspect as _inspect_mod  # noqa: E402
+from mongosemantic.commands import reindex as _reindex_mod  # noqa: E402
+from mongosemantic.commands import retry as _retry_mod  # noqa: E402
+from mongosemantic.commands import search as _search_mod  # noqa: E402
+from mongosemantic.commands import status as _status_mod  # noqa: E402
+
+app.command("inspect")(_inspect_mod.inspect_cmd)
+app.command("apply")(_apply_mod.apply_cmd)
+app.command("index")(_index_mod.index_cmd)
+app.command("search")(_search_mod.search_cmd)
+app.command("status")(_status_mod.status_cmd)
+app.command("retry")(_retry_mod.retry_cmd)
+app.command("reindex")(_reindex_mod.reindex_cmd)
+
+
+@app.command("worker")
+def worker_cmd(
+    poll_interval: int = typer.Option(30, "--poll-interval", help="Polling seconds (standalone)"),
+    batch_size: int = typer.Option(32, "--batch-size"),
+) -> None:
+    """Run the sync + embedding background worker."""
+    from mongosemantic.commands.worker_cmd import run_worker
+    run_worker(poll_interval=poll_interval, batch_size=batch_size)
