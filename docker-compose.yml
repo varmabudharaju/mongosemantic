@@ -1,0 +1,33 @@
+services:
+  mongo-rs-0:
+    image: mongo:7.0
+    container_name: mongosemantic-rs-0
+    ports: ["27117:27117"]
+    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27117"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--port", "27117", "--eval", "db.adminCommand('ping').ok || quit(1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  mongo-rs-init:
+    image: mongo:7.0
+    depends_on: [mongo-rs-0]
+    restart: "no"
+    entrypoint: ["bash", "-c"]
+    command: >
+      "sleep 5 && mongosh --host mongo-rs-0 --port 27117 --eval '
+      rs.initiate({_id: \"rs0\", members: [
+        {_id: 0, host: \"localhost:27117\"}
+      ]})'"
+
+  mongo-standalone:
+    image: mongo:7.0
+    container_name: mongosemantic-standalone
+    ports: ["27219:27017"]
+    command: ["--bind_ip_all"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok || quit(1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
