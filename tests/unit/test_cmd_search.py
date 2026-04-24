@@ -20,18 +20,6 @@ def _setup(monkeypatch):
         fields=[FieldSpec(path="body")], embedding_model="local-fast", embedding_dim=3,
         created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc),
     ))
-    db["articles_embeddings"].insert_many([
-        {"source_id": "a", "source_collection": "articles", "field_path": "body",
-         "chunk_index": 0, "chunk_text": "match me",
-         "embedding": [1.0, 0.0, 0.0], "embedding_model": "local-fast", "embedding_dim": 3},
-        {"source_id": "b", "source_collection": "articles", "field_path": "body",
-         "chunk_index": 0, "chunk_text": "no match",
-         "embedding": [0.0, 1.0, 0.0], "embedding_model": "local-fast", "embedding_dim": 3},
-    ])
-    db["articles"].insert_many([
-        {"_id": "a", "body": "match me"},
-        {"_id": "b", "body": "no match"},
-    ])
     return db
 
 def test_search_prints_results_single_collection(monkeypatch):
@@ -42,8 +30,31 @@ def test_search_prints_results_single_collection(monkeypatch):
     fake_conn.db = db
     from mongosemantic.db.client import Topology
     fake_conn.topology = Topology.STANDALONE
+
+    # Patch _run_one to return stub rows directly — this bypasses mongomock's
+    # aggregation engine (which doesn't support $reduce / $zip) and keeps the
+    # production pipeline code path real for integration tests.
+    fake_rows = [
+        {
+            "source_id": "a",
+            "source_collection": "articles",
+            "field_path": "body",
+            "chunk_index": 0,
+            "chunk_text": "match me",
+            "score": 0.97,
+        },
+        {
+            "source_id": "b",
+            "source_collection": "articles",
+            "field_path": "body",
+            "chunk_index": 0,
+            "chunk_text": "no match",
+            "score": 0.12,
+        },
+    ]
     with patch("mongosemantic.commands.search.MongoConnection.open", return_value=fake_conn), \
-         patch("mongosemantic.commands.search.get_provider", return_value=fake_provider):
+         patch("mongosemantic.commands.search.get_provider", return_value=fake_provider), \
+         patch("mongosemantic.commands.search._run_one", return_value=fake_rows):
         r = runner.invoke(app, ["search", "match me", "--collection", "articles", "--limit", "2"])
         assert r.exit_code == 0, r.output
         assert "match me" in r.stdout

@@ -34,12 +34,7 @@ def _run_one(db, cfg, collection: str, query_vec: list[float], limit: int, topol
             query_vector=query_vec,
             limit=limit,
         )
-    try:
-        rows = list(shadow.aggregate(pipeline))
-    except NotImplementedError:
-        # mongomock does not implement some aggregation operators (e.g. $reduce);
-        # degrade gracefully in test environments so the CLI still renders output.
-        rows = []
+    rows = list(shadow.aggregate(pipeline))
     for r in rows:
         r["source_collection"] = collection
     return rows
