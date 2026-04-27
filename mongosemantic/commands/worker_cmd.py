@@ -1,2 +1,72 @@
-def run_worker(**_):
-    raise NotImplementedError("worker command not yet implemented")
+from __future__ import annotations
+
+import signal
+import threading
+import time
+
+from rich.console import Console
+
+from mongosemantic.config import Settings
+from mongosemantic.db.client import MongoConnection, Topology
+from mongosemantic.embeddings.provider import get_provider
+from mongosemantic.state import ensure_indexes, list_configured
+from mongosemantic.sync.change_stream import ChangeStreamListener
+from mongosemantic.sync.polling import poll_once
+from mongosemantic.worker.runner import WorkerRunner
+
+console = Console()
+
+
+def run_worker(poll_interval: int, batch_size: int) -> None:
+    settings = Settings()
+    conn = MongoConnection.open(settings.uri, settings.database)
+    db = conn.db
+    ensure_indexes(db)
+    provider = get_provider(settings.model)
+    runner = WorkerRunner(db, provider, batch_size=batch_size)
+    threads: list[threading.Thread] = []
+    threads.append(threading.Thread(target=runner.run, name="embed-worker", daemon=True))
+
+    listener = None
+    if conn.topology in (Topology.ATLAS, Topology.REPLICA_SET):
+        configured = [c.collection for c in list_configured(db)]
+        if configured:
+            listener = ChangeStreamListener(db, configured)
+            threads.append(
+                threading.Thread(target=listener.run, name="change-stream", daemon=True)
+            )
+        console.print(f"[green]Change streams: {configured}[/green]")
+    else:
+        console.print(
+            f"[yellow]Standalone MongoDB. Polling every {poll_interval}s.[/yellow]"
+        )
+
+    stop = threading.Event()
+
+    def _shutdown(*_):
+        console.print("\n[yellow]Shutting down…[/yellow]")
+        stop.set()
+        runner.stop()
+        if listener:
+            listener.stop()
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
+    for t in threads:
+        t.start()
+
+    try:
+        while not stop.is_set():
+            if conn.topology == Topology.STANDALONE:
+                for cfg in list_configured(db):
+                    try:
+                        poll_once(db, cfg.collection)
+                    except Exception:
+                        console.print_exception(show_locals=False)
+            for _ in range(poll_interval):
+                if stop.is_set():
+                    break
+                time.sleep(1)
+    finally:
+        conn.close()
