@@ -1,5 +1,6 @@
 import pytest
 
+
 @pytest.mark.integration
 def test_replica_set_is_reachable(replica_set_client):
     info = replica_set_client.admin.command("hello")

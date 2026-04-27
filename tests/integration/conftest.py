@@ -1,6 +1,7 @@
-import os
+import contextlib
 import time
 import uuid
+
 import pytest
 from pymongo import MongoClient
 
@@ -18,10 +19,8 @@ def _wait_for(uri: str, timeout: float = 60.0) -> MongoClient:
             return client
         except Exception as e:
             if client is not None:
-                try:
+                with contextlib.suppress(Exception):
                     client.close()
-                except Exception:
-                    pass
             last_err = e
             time.sleep(1)
     raise RuntimeError(f"Mongo at {uri} not reachable within {timeout}s: {last_err}")
