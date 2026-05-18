@@ -17,18 +17,39 @@ mongosemantic apply   --collection articles --field body
 mongosemantic index   --collection articles        # bulk-embed existing docs
 mongosemantic worker &                             # keep embeddings in sync
 mongosemantic search  "budget travel"              # search by meaning
+mongosemantic ui                                   # browser dashboard on :8080
 ```
 
-## Status (v0.1.0 MVP)
+## Web dashboard
+
+```bash
+mongosemantic ui                          # http://127.0.0.1:8080
+```
+
+Localhost-bound by default with CSRF protection, rate limiting, and security
+headers. Bind to a non-loopback address only behind your own auth proxy.
+
+The dashboard provides:
+
+- Connection setup with topology detection
+- Collections browser with per-field suitability scoring
+- One-click semantic-search configuration (shadow or inline, Atlas index auto-creation)
+- Bulk indexing with progress
+- Live-search across one or all configured collections
+- Read-only aggregation runner (10s timeout, 100-doc limit)
+- Job queue dashboard with retry / reindex
+
+## Status (v0.2.0)
 
 - [x] Connect to Atlas / replica set / standalone
 - [x] Inspect a collection, score fields for suitability
-- [x] Configure shadow-mode semantic search on a field
+- [x] Configure shadow-mode **or inline-mode** semantic search on one or more fields
+- [x] Real chunking — long documents split into overlapping chunks, search ranks per chunk
 - [x] Bulk-embed existing documents
 - [x] Sync in real time (change streams) or on a schedule (polling)
 - [x] Search via native Atlas `$vectorSearch` or brute-force aggregation
-- [x] CLI: inspect / apply / index / search / worker / status / retry / reindex
-- [ ] Web UI _(v0.2.0)_
+- [x] CLI: inspect / apply / index / search / worker / status / retry / reindex / **ui**
+- [x] **Web UI** with seven pages and a safe aggregation runner
 - [ ] MCP server for AI agents _(v0.3.0)_
 - [ ] Atlas hybrid search (semantic + keyword) _(v0.4.0)_
 - [ ] Zero-downtime model migration _(v0.5.0)_

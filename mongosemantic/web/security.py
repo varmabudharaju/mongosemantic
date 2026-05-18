@@ -3,7 +3,7 @@ from __future__ import annotations
 import secrets
 import time
 from collections import defaultdict, deque
-from typing import Callable
+from collections.abc import Callable
 
 from fastapi import FastAPI, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
