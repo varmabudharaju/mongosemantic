@@ -11,7 +11,6 @@ from pymongo.errors import PyMongoError
 
 from mongosemantic.state import (
     enqueue_delete_all,
-    enqueue_embed,
     load_config,
     load_resume_token,
     save_resume_token,
@@ -44,6 +43,17 @@ def _resolve_text(value: Any) -> str:
         return " ".join(str(v) for v in value)
     return str(value)
 
+def _is_self_write(event: dict) -> bool:
+    """True when an update event touches only `_msem.*` fields — i.e., us writing back."""
+    desc = event.get("updateDescription") or {}
+    updated = desc.get("updatedFields") or {}
+    removed = desc.get("removedFields") or []
+    if not updated and not removed:
+        return False
+    all_keys = list(updated.keys()) + list(removed)
+    return all(k == "_msem" or k.startswith("_msem.") for k in all_keys)
+
+
 def process_event(db: Database, event: dict) -> None:
     coll = event.get("ns", {}).get("coll")
     if not coll:
@@ -59,36 +69,13 @@ def process_event(db: Database, event: dict) -> None:
         return
     if op not in ("insert", "update", "replace"):
         return
+    if cfg.mode == "inline" and op == "update" and _is_self_write(event):
+        return
     full = event.get("fullDocument") or {}
     if not full:
         return
-    shadow = db[cfg.shadow_collection]
-    for spec in cfg.fields:
-        text = _resolve_text(_get_path(full, spec.path))
-        if not text:
-            continue
-        new_hash = hash_text(cfg.embedding_model, text)
-        existing = shadow.find_one(
-            {
-                "source_id": key,
-                "field_path": spec.path,
-                "chunk_index": 0,
-                "embedding_model": cfg.embedding_model,
-            },
-            {"embedding_hash": 1},
-        )
-        if existing and existing.get("embedding_hash") == new_hash:
-            continue
-        enqueue_embed(
-            db,
-            collection=coll,
-            source_id=key,
-            field_path=spec.path,
-            chunk_index=None if not spec.chunked else 0,
-            input_text=text,
-            input_hash=new_hash,
-            model=cfg.embedding_model,
-        )
+    from mongosemantic.sync.enqueue import enqueue_for_doc
+    enqueue_for_doc(db, cfg, source_id=key, doc=full)
 
 class ChangeStreamListener:
     def __init__(self, db: Database, collections: list[str]) -> None:

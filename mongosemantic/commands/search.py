@@ -12,32 +12,61 @@ from mongosemantic.exceptions import NotConfiguredError
 from mongosemantic.search.atlas import build_atlas_pipeline
 from mongosemantic.search.brute_force import build_brute_pipeline
 from mongosemantic.search.cross_collection import min_max_normalize, per_collection_targets
+from mongosemantic.search.inline import build_inline_atlas_pipeline, build_inline_brute_pipeline
 from mongosemantic.state import load_config
 
 console = Console()
 
-def _run_one(db, cfg, collection: str, query_vec: list[float], limit: int, topology: Topology):
-    field_path = cfg.fields[0].path
-    shadow = db[cfg.shadow_collection]
-    if topology == Topology.ATLAS and atlas_vector_index_exists(shadow, collection, field_path):
-        pipeline = build_atlas_pipeline(
-            source_collection=collection,
-            field_path=field_path,
-            query_vector=query_vec,
-            limit=limit,
-            index_name=vector_index_name(collection, field_path),
-        )
+def _run_one_field(
+    db, cfg, collection: str, field_path: str, query_vec: list[float],
+    limit: int, topology: Topology,
+):
+    if cfg.mode == "inline":
+        target = db[collection]
+        if topology == Topology.ATLAS and atlas_vector_index_exists(target, collection, field_path):
+            pipeline = build_inline_atlas_pipeline(
+                field_path=field_path,
+                query_vector=query_vec,
+                limit=limit,
+                index_name=vector_index_name(collection, field_path),
+            )
+        else:
+            pipeline = build_inline_brute_pipeline(
+                field_path=field_path,
+                query_vector=query_vec,
+                limit=limit,
+            )
     else:
-        pipeline = build_brute_pipeline(
-            source_collection=collection,
-            field_path=field_path,
-            query_vector=query_vec,
-            limit=limit,
-        )
-    rows = list(shadow.aggregate(pipeline))
+        target = db[cfg.shadow_collection]
+        if topology == Topology.ATLAS and atlas_vector_index_exists(target, collection, field_path):
+            pipeline = build_atlas_pipeline(
+                source_collection=collection,
+                field_path=field_path,
+                query_vector=query_vec,
+                limit=limit,
+                index_name=vector_index_name(collection, field_path),
+            )
+        else:
+            pipeline = build_brute_pipeline(
+                source_collection=collection,
+                field_path=field_path,
+                query_vector=query_vec,
+                limit=limit,
+            )
+    rows = list(target.aggregate(pipeline))
     for r in rows:
         r["source_collection"] = collection
     return rows
+
+
+def _run_one(db, cfg, collection: str, query_vec: list[float], limit: int, topology: Topology):
+    merged: list[dict] = []
+    for spec in cfg.fields:
+        merged.extend(
+            _run_one_field(db, cfg, collection, spec.path, query_vec, limit, topology)
+        )
+    merged.sort(key=lambda r: r.get("score", 0.0), reverse=True)
+    return merged[:limit]
 
 def search_cmd(
     query: str = typer.Argument(...),

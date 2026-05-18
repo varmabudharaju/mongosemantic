@@ -5,12 +5,11 @@ from typing import Any
 from pymongo.database import Database
 
 from mongosemantic.state import (
-    enqueue_embed,
     load_config,
     load_polling_watermark,
     save_polling_watermark,
 )
-from mongosemantic.sync.change_stream import _get_path, _resolve_text, hash_text
+from mongosemantic.sync.enqueue import enqueue_for_doc
 
 
 def poll_once(
@@ -28,39 +27,11 @@ def poll_once(
     cursor = db[collection].find(filter_).sort(watermark_field, 1).limit(batch_size)
     new_wm: Any = last
     enqueued = 0
-    shadow = db[cfg.shadow_collection]
     for doc in cursor:
         wm_val = doc.get(watermark_field)
         if wm_val is not None and (new_wm is None or wm_val > new_wm):
             new_wm = wm_val
-        key = doc.get("_id")
-        for spec in cfg.fields:
-            text = _resolve_text(_get_path(doc, spec.path))
-            if not text:
-                continue
-            new_hash = hash_text(cfg.embedding_model, text)
-            existing = shadow.find_one(
-                {
-                    "source_id": key,
-                    "field_path": spec.path,
-                    "chunk_index": 0,
-                    "embedding_model": cfg.embedding_model,
-                },
-                {"embedding_hash": 1},
-            )
-            if existing and existing.get("embedding_hash") == new_hash:
-                continue
-            enqueue_embed(
-                db,
-                collection=collection,
-                source_id=key,
-                field_path=spec.path,
-                chunk_index=None if not spec.chunked else 0,
-                input_text=text,
-                input_hash=new_hash,
-                model=cfg.embedding_model,
-            )
-            enqueued += 1
+        enqueued += enqueue_for_doc(db, cfg, source_id=doc.get("_id"), doc=doc)
     if new_wm is not None and new_wm != last:
         save_polling_watermark(db, collection, new_wm)
     return enqueued

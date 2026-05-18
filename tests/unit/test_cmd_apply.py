@@ -28,7 +28,8 @@ def test_apply_creates_shadow_indexes_and_saves_config(monkeypatch):
     assert cfg.fields[0].path == "body"
     assert cfg.shadow_collection == "articles_embeddings"
 
-def test_apply_rejects_chunk_without_shadow(monkeypatch):
+def test_apply_rejects_chunk_with_inline(monkeypatch):
+    """--chunked is incompatible with --mode inline; reject loudly, don't silently downgrade."""
     _patch_env(monkeypatch)
     fake_db = mongomock.MongoClient()["d"]
     fake_conn = MagicMock()
@@ -41,5 +42,7 @@ def test_apply_rejects_chunk_without_shadow(monkeypatch):
             ["apply", "--collection", "articles", "--field", "body",
              "--mode", "inline", "--chunked"],
         )
-        assert r.exit_code == 0
-        assert "shadow" in r.output.lower()
+        assert r.exit_code != 0
+        assert "chunk" in r.output.lower() and "shadow" in r.output.lower()
+    from mongosemantic.state import load_config
+    assert load_config(fake_db, "articles") is None

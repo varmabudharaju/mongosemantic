@@ -9,6 +9,7 @@ from typing import Any
 
 from pymongo.database import Database
 
+from mongosemantic.db.queries import INLINE_ROOT, inline_field_key
 from mongosemantic.embeddings.provider import EmbeddingProvider
 from mongosemantic.state import (
     claim_batch,
@@ -24,16 +25,9 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _write_embedding(
-    db: Database, cfg_cache: dict, job: dict, vector: list[float]
+def _write_embedding_shadow(
+    db: Database, cfg, job: dict, vector: list[float]
 ) -> None:
-    coll_name = job["collection"]
-    if coll_name not in cfg_cache:
-        cfg = load_config(db, coll_name)
-        if not cfg:
-            return
-        cfg_cache[coll_name] = cfg
-    cfg = cfg_cache[coll_name]
     shadow = db[cfg.shadow_collection]
     chunk_index = job.get("chunk_index") if job.get("chunk_index") is not None else 0
     shadow.update_one(
@@ -45,7 +39,7 @@ def _write_embedding(
         },
         {
             "$set": {
-                "source_collection": coll_name,
+                "source_collection": cfg.collection,
                 "chunk_text": job["input_text"],
                 "embedding": vector,
                 "embedding_model": cfg.embedding_model,
@@ -59,6 +53,42 @@ def _write_embedding(
     )
 
 
+def _write_embedding_inline(
+    db: Database, cfg, job: dict, vector: list[float]
+) -> None:
+    key = inline_field_key(job["field_path"])
+    base = f"{INLINE_ROOT}.{key}"
+    db[cfg.collection].update_one(
+        {"_id": job["source_id"]},
+        {
+            "$set": {
+                f"{base}.embedding": vector,
+                f"{base}.model": cfg.embedding_model,
+                f"{base}.dim": cfg.embedding_dim,
+                f"{base}.hash": job["input_hash"],
+                f"{base}.text": job["input_text"],
+                f"{base}.updated_at": _utcnow(),
+            }
+        },
+    )
+
+
+def _write_embedding(
+    db: Database, cfg_cache: dict, job: dict, vector: list[float]
+) -> None:
+    coll_name = job["collection"]
+    if coll_name not in cfg_cache:
+        cfg = load_config(db, coll_name)
+        if not cfg:
+            return
+        cfg_cache[coll_name] = cfg
+    cfg = cfg_cache[coll_name]
+    if cfg.mode == "inline":
+        _write_embedding_inline(db, cfg, job, vector)
+    else:
+        _write_embedding_shadow(db, cfg, job, vector)
+
+
 def _handle_delete(db: Database, cfg_cache: dict, job: dict) -> None:
     coll_name = job["collection"]
     if coll_name not in cfg_cache:
@@ -67,7 +97,12 @@ def _handle_delete(db: Database, cfg_cache: dict, job: dict) -> None:
             return
         cfg_cache[coll_name] = cfg
     cfg = cfg_cache[coll_name]
-    db[cfg.shadow_collection].delete_many({"source_id": job["source_id"]})
+    if cfg.mode == "inline":
+        db[cfg.collection].update_one(
+            {"_id": job["source_id"]}, {"$unset": {INLINE_ROOT: ""}}
+        )
+    else:
+        db[cfg.shadow_collection].delete_many({"source_id": job["source_id"]})
 
 
 def process_batch(

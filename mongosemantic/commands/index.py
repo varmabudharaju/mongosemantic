@@ -7,8 +7,8 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeEl
 from mongosemantic.config import Settings
 from mongosemantic.db.client import MongoConnection
 from mongosemantic.exceptions import NotConfiguredError
-from mongosemantic.state import enqueue_embed, ensure_indexes, load_config
-from mongosemantic.sync.change_stream import _get_path, _resolve_text, hash_text
+from mongosemantic.state import ensure_indexes, load_config
+from mongosemantic.sync.enqueue import enqueue_for_doc
 
 console = Console()
 
@@ -28,7 +28,6 @@ def index_cmd(
                 f"{collection} is not configured. Run `mongosemantic apply` first."
             )
         total = db[collection].estimated_document_count()
-        shadow = db[cfg.shadow_collection]
         processed = 0
         with Progress(
             SpinnerColumn(),
@@ -38,33 +37,7 @@ def index_cmd(
         ) as progress:
             task_id = progress.add_task("enqueue", total=total)
             for doc in db[collection].find({}, batch_size=batch_size):
-                key = doc.get("_id")
-                for spec in cfg.fields:
-                    text = _resolve_text(_get_path(doc, spec.path))
-                    if not text:
-                        continue
-                    new_hash = hash_text(cfg.embedding_model, text)
-                    existing = shadow.find_one(
-                        {
-                            "source_id": key,
-                            "field_path": spec.path,
-                            "chunk_index": 0,
-                            "embedding_model": cfg.embedding_model,
-                        },
-                        {"embedding_hash": 1},
-                    )
-                    if existing and existing.get("embedding_hash") == new_hash:
-                        continue
-                    enqueue_embed(
-                        db,
-                        collection=collection,
-                        source_id=key,
-                        field_path=spec.path,
-                        chunk_index=None,
-                        input_text=text,
-                        input_hash=new_hash,
-                        model=cfg.embedding_model,
-                    )
+                enqueue_for_doc(db, cfg, source_id=doc.get("_id"), doc=doc)
                 processed += 1
                 progress.update(task_id, completed=processed)
         console.print(

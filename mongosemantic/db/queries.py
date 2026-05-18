@@ -2,6 +2,33 @@ from __future__ import annotations
 
 from typing import Any
 
+INLINE_ROOT = "_msem"
+
+
+def inline_field_key(field_path: str) -> str:
+    """Encode a (possibly dotted) field path into a single Mongo key.
+
+    `"body"`     → `"body"`
+    `"user.bio"` → `"user__bio"`
+
+    Dots in source paths would otherwise be interpreted as sub-document traversal
+    when used as a key inside the `_msem` sub-doc.
+    """
+    return field_path.replace(".", "__")
+
+
+def inline_embedding_path(field_path: str) -> str:
+    """Dotted Mongo path to the embedding for a configured field on a source doc."""
+    return f"{INLINE_ROOT}.{inline_field_key(field_path)}.embedding"
+
+
+def inline_text_path(field_path: str) -> str:
+    return f"{INLINE_ROOT}.{inline_field_key(field_path)}.text"
+
+
+def inline_hash_path(field_path: str) -> str:
+    return f"{INLINE_ROOT}.{inline_field_key(field_path)}.hash"
+
 
 def lookup_source_stage(source_collection: str) -> dict[str, Any]:
     return {
