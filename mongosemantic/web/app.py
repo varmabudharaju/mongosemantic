@@ -8,6 +8,7 @@ from mongosemantic.web.content import CONTENT
 from mongosemantic.web.routes import apply as _apply_routes
 from mongosemantic.web.routes import collections as _collections_routes
 from mongosemantic.web.routes import index as _index_routes
+from mongosemantic.web.routes import search as _search_routes
 from mongosemantic.web.routes import system as _system_routes
 from mongosemantic.web.security import (
     install_csrf,
@@ -40,5 +41,6 @@ def create_app() -> FastAPI:
     app.include_router(_collections_routes.router)
     app.include_router(_apply_routes.router)
     app.include_router(_index_routes.router)
+    app.include_router(_search_routes.router)
 
     return app
