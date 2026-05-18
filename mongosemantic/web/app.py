@@ -5,6 +5,11 @@ from fastapi.responses import JSONResponse
 
 from mongosemantic import __version__
 from mongosemantic.web.content import CONTENT
+from mongosemantic.web.security import (
+    install_csrf,
+    install_rate_limit,
+    install_security_headers,
+)
 
 
 def create_app() -> FastAPI:
@@ -15,6 +20,9 @@ def create_app() -> FastAPI:
         redoc_url=None,
         openapi_url=None,
     )
+    install_security_headers(app)
+    install_rate_limit(app, limit=120, window_seconds=60)
+    install_csrf(app)
 
     @app.get("/healthz")
     def _healthz() -> JSONResponse:
