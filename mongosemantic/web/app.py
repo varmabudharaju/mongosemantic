@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 
 from mongosemantic import __version__
 from mongosemantic.web.content import CONTENT
+from mongosemantic.web.routes import aggregation as _aggregation_routes
 from mongosemantic.web.routes import apply as _apply_routes
 from mongosemantic.web.routes import collections as _collections_routes
 from mongosemantic.web.routes import index as _index_routes
@@ -42,5 +43,6 @@ def create_app() -> FastAPI:
     app.include_router(_apply_routes.router)
     app.include_router(_index_routes.router)
     app.include_router(_search_routes.router)
+    app.include_router(_aggregation_routes.router)
 
     return app
