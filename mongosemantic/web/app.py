@@ -12,6 +12,7 @@ from mongosemantic.web.routes import dashboard as _dashboard_routes
 from mongosemantic.web.routes import index as _index_routes
 from mongosemantic.web.routes import search as _search_routes
 from mongosemantic.web.routes import system as _system_routes
+from mongosemantic.web.routes import ui as _ui_routes
 from mongosemantic.web.security import (
     install_csrf,
     install_rate_limit,
@@ -46,5 +47,6 @@ def create_app() -> FastAPI:
     app.include_router(_search_routes.router)
     app.include_router(_aggregation_routes.router)
     app.include_router(_dashboard_routes.router)
+    _ui_routes.install(app)
 
     return app
