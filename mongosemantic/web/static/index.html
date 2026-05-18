@@ -1,1 +1,107 @@
-<!doctype html><title>mongosemantic</title>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mongosemantic</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header id="app-header">
+    <h1>mongosemantic</h1>
+    <nav id="app-nav" aria-label="primary">
+      <a href="#/connection"  data-page="connection">Connection</a>
+      <a href="#/collections" data-page="collections">Collections</a>
+      <a href="#/search"      data-page="search">Search</a>
+      <a href="#/query"       data-page="query">Query</a>
+      <a href="#/dashboard"   data-page="dashboard">Dashboard</a>
+      <a href="#/visualize"   data-page="visualize">Visualize</a>
+      <a href="#/mcp"         data-page="mcp">MCP</a>
+    </nav>
+  </header>
+
+  <main id="app-main" aria-live="polite">
+    <section id="page-connection" hidden>
+      <h2 data-content="connection.title"></h2>
+      <p  data-content="connection.subtitle"></p>
+      <form id="form-connection">
+        <label data-content="connection.uri_label" for="conn-uri"></label>
+        <input id="conn-uri" name="uri" data-placeholder="connection.uri_placeholder">
+        <label data-content="connection.db_label" for="conn-db"></label>
+        <input id="conn-db" name="database">
+        <small data-content="connection.db_helper"></small>
+        <button type="submit" data-content="connection.test_button"></button>
+      </form>
+      <p id="conn-state"></p>
+      <small data-content="connection.footer_note"></small>
+    </section>
+
+    <section id="page-collections" hidden>
+      <h2 data-content="collections.title"></h2>
+      <p  data-content="collections.subtitle"></p>
+      <table id="collections-table"></table>
+      <div id="collections-empty" hidden>
+        <h3 data-content="collections.empty_title"></h3>
+        <p  data-content="collections.empty_body"></p>
+      </div>
+    </section>
+
+    <section id="page-inspect" hidden>
+      <h2 id="inspect-title"></h2>
+      <p  id="inspect-subtitle"></p>
+      <table id="inspect-table"></table>
+      <p><a id="inspect-apply-link" href="#/apply/">Configure →</a></p>
+    </section>
+
+    <section id="page-apply" hidden>
+      <h2 data-content="apply.title"></h2>
+      <p  data-content="apply.subtitle"></p>
+      <form id="form-apply"></form>
+      <p id="apply-notice"></p>
+    </section>
+
+    <section id="page-indexing" hidden>
+      <h2 id="indexing-title"></h2>
+      <p  data-content="indexing.subtitle"></p>
+      <progress id="indexing-progress" value="0" max="0"></progress>
+      <p id="indexing-metric"></p>
+    </section>
+
+    <section id="page-search" hidden>
+      <input id="search-q" type="search" data-placeholder="search.placeholder">
+      <select id="search-collection"></select>
+      <ol id="search-results"></ol>
+      <p id="search-empty"></p>
+    </section>
+
+    <section id="page-query" hidden>
+      <h2 data-content="aggregation.title"></h2>
+      <p  data-content="aggregation.subtitle"></p>
+      <p  data-content="aggregation.safety_banner" id="query-banner"></p>
+      <input id="query-collection" placeholder="collection name">
+      <textarea id="query-pipeline" data-default="aggregation.default_pipeline" rows="10"></textarea>
+      <button id="query-run" data-content="aggregation.btn_run"></button>
+      <pre id="query-results"></pre>
+    </section>
+
+    <section id="page-dashboard" hidden>
+      <h2>Overview</h2>
+      <div id="dashboard-cards"></div>
+      <p><button id="dashboard-retry">Retry failed jobs</button></p>
+    </section>
+
+    <section id="page-visualize" hidden>
+      <h2 data-content="visualize.title"></h2>
+      <p  data-content="visualize.coming_in"></p>
+    </section>
+
+    <section id="page-mcp" hidden>
+      <h2 data-content="mcp.title"></h2>
+      <p  data-content="mcp.coming_in"></p>
+    </section>
+  </main>
+
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
