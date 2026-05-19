@@ -22,7 +22,6 @@ shadow collections (handy after switching between datasets).
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 import tempfile
@@ -30,7 +29,7 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-from bson import ObjectId, json_util
+from bson import json_util
 from pymongo import MongoClient
 
 # Community mirror of MongoDB's `sample_mflix`. The same JSON Atlas seeds.
