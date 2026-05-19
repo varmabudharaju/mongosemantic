@@ -179,7 +179,7 @@ After seeding either dataset:
 # For mflix:
 mongosemantic apply  -c movies -f title -f plot
 mongosemantic index  -c movies
-mongosemantic worker --once     # drains the queue and exits
+mongosemantic worker --once     # processes all pending jobs, then exits
 mongosemantic search "spies blackmail and intrigue in cold war Berlin" -c movies
 ```
 
