@@ -30,6 +30,7 @@
       <a href="#/dashboard"   data-page="dashboard">Dashboard</a>
       <a href="#/visualize"   data-page="visualize">Visualize</a>
       <a href="#/mcp"         data-page="mcp">MCP</a>
+      <a href="#/guide"       data-page="guide">Guide</a>
     </nav>
   </header>
 
@@ -88,7 +89,10 @@
     <section id="page-search" hidden>
       <h2>Search</h2>
       <p data-content="search.placeholder" style="display:none"></p>
-      <input id="search-q" type="search" data-placeholder="search.placeholder">
+      <form id="search-form" style="margin:0;padding:0;border:0;display:flex;gap:12px;background:transparent;box-shadow:none">
+        <input id="search-q" type="search" data-placeholder="search.placeholder" style="flex:1;max-width:none">
+        <button type="submit" id="search-go" style="white-space:nowrap">Search</button>
+      </form>
       <div class="search-controls">
         <select id="search-collection"></select>
         <label class="hybrid-toggle">
@@ -105,7 +109,9 @@
       <h2 data-content="aggregation.title"></h2>
       <p  data-content="aggregation.subtitle"></p>
       <p  data-content="aggregation.safety_banner" id="query-banner"></p>
-      <input id="query-collection" placeholder="collection name">
+      <label for="query-collection">Collection</label>
+      <select id="query-collection"></select>
+      <label for="query-pipeline" style="margin-top:12px">Pipeline (JSON array of stages)</label>
       <textarea id="query-pipeline" data-default="aggregation.default_pipeline" rows="10"></textarea>
       <div style="margin-top:12px"><button id="query-run" data-content="aggregation.btn_run"></button></div>
       <pre id="query-results"></pre>
@@ -164,7 +170,25 @@
 
     <section id="page-mcp" hidden>
       <h2 data-content="mcp.title"></h2>
-      <p  data-content="mcp.coming_in"></p>
+      <p  data-content="mcp.subtitle"></p>
+
+      <h3 style="margin-top:24px">Claude Desktop</h3>
+      <p data-content="mcp.integrate_intro"></p>
+      <div class="code-block"><code data-content="mcp.integrate_cmd"></code><button class="copy-btn" data-copy="mcp.integrate_cmd">Copy</button></div>
+      <p data-content="mcp.integrate_follow_up"></p>
+
+      <h3 style="margin-top:24px">Other MCP clients (Cursor, SSE)</h3>
+      <p data-content="mcp.serve_intro"></p>
+      <div class="code-block"><code data-content="mcp.serve_cmd"></code><button class="copy-btn" data-copy="mcp.serve_cmd">Copy</button></div>
+
+      <h3 style="margin-top:24px" data-content="mcp.tools_heading"></h3>
+      <div class="table-wrap"><table id="mcp-tools-table"></table></div>
+    </section>
+
+    <section id="page-guide" hidden>
+      <h2>Guide</h2>
+      <p>A 5-minute tour of everything mongosemantic does. Each section maps to a page in the nav above.</p>
+      <div id="guide-content"></div>
     </section>
 
   </main>

@@ -4,7 +4,23 @@
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
   let CONTENT = {};
-  const PAGES = ["connection", "collections", "inspect", "apply", "indexing", "search", "query", "dashboard", "visualize", "mcp"];
+  const PAGES = ["connection", "collections", "inspect", "apply", "indexing", "search", "query", "dashboard", "visualize", "mcp", "guide"];
+
+  // MCP tools shown on the MCP page. Source of truth is mcp_server/server.py;
+  // this is a static mirror so the UI works without a tool-list endpoint.
+  const MCP_TOOLS = [
+    ["semantic_search", "Find documents in one collection by meaning."],
+    ["hybrid_search", "Combine semantic + BM25 keyword via Atlas $rankFusion. Falls back to pure semantic elsewhere."],
+    ["search_all_collections", "Cross-collection fanout, merged by score."],
+    ["list_collections", "Every collection with its configured/not-configured status."],
+    ["list_configured", "Just the collections with semantic search wired up."],
+    ["inspect_collection", "Per-field suitability scoring on a sample."],
+    ["get_sample_documents", "A few real documents (embedding sub-doc stripped)."],
+    ["get_status", "Topology, configured count, total embeddings, job-queue counts."],
+    ["safe_aggregation", "Read-only aggregation runner (10s, 100-row cap, $out/$merge/$function blocked)."],
+    ["get_schema_context", "Compact schema summary an AI agent can use to build aggregations."],
+    ["migrate_model", "Switch a collection's embedding model with near-zero downtime."],
+  ];
 
   const csrfFromCookie = () => {
     const m = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
@@ -70,6 +86,67 @@
   const escapeHtml = (s) => String(s ?? "")
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+
+  // ---- guide content -----------------------------------------------------
+  const GUIDE_HTML = `
+    <h3>1. Connection</h3>
+    <p>The server already knows where MongoDB lives (from the <code>MONGOSEMANTIC_URI</code> env var). The Connection page lets you point the running server at a different cluster without restarting it.</p>
+    <p>Click the topology line on the Dashboard to confirm: <code>atlas</code>, <code>replica_set</code>, or <code>standalone</code> — each unlocks different capabilities.</p>
+
+    <h3>2. Collections</h3>
+    <p>Lists every collection in the current database. Each row shows:</p>
+    <ul>
+      <li><strong>Status</strong> — configured or not.</li>
+      <li><strong>Model</strong> — which embedding model is in use, and the storage mode (shadow or inline).</li>
+      <li><strong>Inspect</strong> — opens a field-by-field suitability table sampled from the collection.</li>
+      <li><strong>Migrate model</strong> — once configured, swap to a different embedding model with near-zero downtime.</li>
+    </ul>
+
+    <h4>Apply (configure semantic search)</h4>
+    <p>From the Inspect page, click <em>Configure semantic search</em>. You'll pick fields, a storage mode, and a model:</p>
+    <ul>
+      <li><strong>Shadow</strong> (recommended) — embeddings live in <code>&lt;collection&gt;_embeddings</code>. Your source docs are untouched.</li>
+      <li><strong>Inline</strong> — embeddings written onto the source doc at <code>_msem.&lt;field&gt;</code>. Faster reads on Atlas; mutates your docs. Doesn't support chunking.</li>
+      <li><strong>Chunked</strong> (shadow only) — long text is split into overlapping chunks before embedding. Search returns the best <em>paragraph</em>, not just the best doc.</li>
+    </ul>
+
+    <h4>Index (embed existing docs)</h4>
+    <p>After Apply, your existing documents need embeddings. Click <em>Index</em> on the indexing page to enqueue jobs. A background worker drains them.</p>
+
+    <h3>3. Search</h3>
+    <p>Type a query, hit <strong>Search</strong> or press Enter. Leave the collection dropdown on <em>All configured collections</em> to fan out across every configured collection, or pick one to scope the search.</p>
+    <div class="try"><strong>Try:</strong> <code>gear for backpacking trips</code> across all collections. You should see results from both <code>articles</code> (a Southeast Asia backpacking post) and <code>products</code> (a 60L pack, hiking boots).</div>
+    <p><strong>Hybrid</strong> toggle: combines semantic similarity with BM25 keyword matching via Atlas <code>$rankFusion</code>. Useful when a query has both fuzzy meaning and a specific term (a product code, a version number). Requires Atlas + shadow mode; falls back to pure semantic everywhere else with a banner explaining why.</p>
+
+    <h3>4. Visualize</h3>
+    <p>Sampled embeddings projected to 2D via PCA. Points close together are similar by meaning. Hover any point for the source snippet.</p>
+    <div class="try"><strong>Try:</strong> pick <code>articles</code>. If you've seeded the demo data, you should see distinct clusters for travel, programming, cooking, fitness, finance — each a separate visual blob.</div>
+
+    <h3>5. Query (safe aggregation)</h3>
+    <p>Run read-only MongoDB aggregation pipelines against any collection. Pipeline runs with a 10-second cap and 100-row limit. <code>$out</code>, <code>$merge</code>, <code>$function</code>, <code>$accumulator</code>, <code>$where</code>, and <code>$jsonSchema</code> are blocked at parse time — the response tells you exactly why.</p>
+    <div class="try"><strong>Try</strong> on <code>articles</code>:<br>
+      <code>[{"$group": {"_id": "$category", "n": {"$sum": 1}}}, {"$sort": {"n": -1}}]</code><br>
+      Returns counts per category.
+    </div>
+
+    <h3>6. Dashboard</h3>
+    <p>Single-page overview: topology, total embeddings, pending and failed jobs, plus the most recent failures with the actual error message. The <strong>Workers</strong> section shows every worker that's heartbeated recently — running, stale, or dead.</p>
+    <p>Start a worker from a terminal to see the workers section come alive:</p>
+    <div class="code-block"><code>mongosemantic worker</code></div>
+
+    <h3>7. Migrate model (live demo)</h3>
+    <p>On the Collections page, click <strong>Migrate model</strong> on any shadow-mode row. Pick a different model, click Migrate, and watch the progress bar. The old shadow collection is preserved as <code>&lt;name&gt;_archive_&lt;timestamp&gt;</code> for rollback — drop it once you've verified.</p>
+    <p>Search keeps serving the old model right up to the swap instant, then the new model from there on. The window between cfg update and atomic <code>renameCollection</code> is milliseconds.</p>
+
+    <h3>8. MCP (AI agent integration)</h3>
+    <p>The <strong>MCP</strong> page in the nav has the exact command to wire mongosemantic into Claude Desktop. Once integrated, any chat in Claude can invoke any of the 11 tools (<code>semantic_search</code>, <code>hybrid_search</code>, <code>safe_aggregation</code>, etc.).</p>
+
+    <h3>What's not in the UI</h3>
+    <ul>
+      <li><strong>Atlas-only paths</strong> (real <code>$vectorSearch</code>, <code>$rankFusion</code>, automatic Atlas Search index creation) need an Atlas cluster. See <code>docs/atlas-setup.md</code> in the repo for a free-tier runbook.</li>
+      <li><strong>Reindex</strong> and <strong>retry failed jobs</strong> exist as API endpoints and CLI commands but aren't surfaced as buttons here yet (besides the Retry-all on the dashboard).</li>
+    </ul>
+  `;
 
   // ---- visualize scatter -------------------------------------------------
   let _vizPoints = [];
@@ -345,50 +422,66 @@
       } catch { /* leave empty */ }
       const input = $("#search-q");
       input.placeholder = c.placeholder;
-      let timer;
-      const run = () => {
-        clearTimeout(timer);
-        timer = setTimeout(async () => {
-          const q = input.value.trim();
-          if (!q) {
-            results.innerHTML = ""; notice.textContent = "";
-            empty.textContent = c.empty_no_query; return;
-          }
-          const params = new URLSearchParams({ q });
-          if (sel.value) params.set("collection", sel.value);
-          if (hybridBox.checked) params.set("hybrid", "true");
-          try {
-            const r = await fetchJson("GET", "/api/search?" + params.toString());
-            notice.textContent = r.notice || "";
-            if (!r.rows.length) { empty.textContent = c.empty_no_results; results.innerHTML = ""; return; }
-            empty.textContent = "";
-            results.innerHTML = r.rows.map(row => `<li>
-              <strong>${(row.score || 0).toFixed(3)}</strong>
-              <div>
-                <div class="meta">
-                  <span class="coll">${escapeHtml(row.source_collection)}</span>
-                  <span>·</span>
-                  <span>${escapeHtml(row.field_path)}</span>
-                </div>
-                <p>${escapeHtml((row.chunk_text || "").slice(0, 300))}</p>
+      const run = async () => {
+        const q = input.value.trim();
+        if (!q) {
+          results.innerHTML = ""; notice.textContent = "";
+          empty.textContent = c.empty_no_query; return;
+        }
+        const goBtn = $("#search-go");
+        const origLabel = goBtn.textContent;
+        goBtn.textContent = "Searching…";
+        goBtn.disabled = true;
+        const params = new URLSearchParams({ q });
+        if (sel.value) params.set("collection", sel.value);
+        if (hybridBox.checked) params.set("hybrid", "true");
+        try {
+          const r = await fetchJson("GET", "/api/search?" + params.toString());
+          notice.textContent = r.notice || "";
+          if (!r.rows.length) { empty.textContent = c.empty_no_results; results.innerHTML = ""; return; }
+          empty.textContent = "";
+          results.innerHTML = r.rows.map(row => `<li>
+            <strong>${(row.score || 0).toFixed(3)}</strong>
+            <div>
+              <div class="meta">
+                <span class="coll">${escapeHtml(row.source_collection)}</span>
+                <span>·</span>
+                <span>${escapeHtml(row.field_path)}</span>
               </div>
-            </li>`).join("");
-          } catch (e) { toast(e.message); }
-        }, 300);
+              <p>${escapeHtml((row.chunk_text || "").slice(0, 300))}</p>
+            </div>
+          </li>`).join("");
+        } catch (e) {
+          toast(e.message);
+        } finally {
+          goBtn.textContent = origLabel;
+          goBtn.disabled = false;
+        }
       };
-      input.oninput = run;
-      sel.onchange = run;
-      hybridBox.onchange = run;
+      // Form submit handles both Enter-in-input and Search button click.
+      $("#search-form").onsubmit = (ev) => { ev.preventDefault(); run(); };
+      // Re-run on filter change ONLY if the user already typed something.
+      const rerunIfQuery = () => { if (input.value.trim()) run(); };
+      sel.onchange = rerunIfQuery;
+      hybridBox.onchange = rerunIfQuery;
+      input.focus();
     },
 
     query: async () => {
       const ta = $("#query-pipeline");
       const out = $("#query-results");
+      const sel = $("#query-collection");
+      try {
+        const cols = await fetchJson("GET", "/api/collections");
+        sel.innerHTML = cols.collections
+          .map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}${c.status === "configured" ? " (configured)" : ""}</option>`)
+          .join("");
+      } catch (e) { toast(e.message); }
       $("#query-run").onclick = async () => {
         let pipeline;
         try { pipeline = JSON.parse(ta.value); }
         catch { toast(CONTENT.aggregation.error_rejected.replace("{reason}", "invalid JSON")); return; }
-        const collection = $("#query-collection").value.trim();
+        const collection = sel.value;
         if (!collection) { toast("collection is required"); return; }
         try {
           const r = await fetchJson(
@@ -462,6 +555,36 @@
           handlers.dashboard();
         } catch (e) { toast(e.message); }
       };
+    },
+
+    mcp: () => {
+      // Populate the tools table. Copy buttons get wired up here too.
+      const tbl = $("#mcp-tools-table");
+      if (tbl) {
+        tbl.innerHTML = `<thead><tr><th>Tool</th><th>What it does</th></tr></thead><tbody>` +
+          MCP_TOOLS.map(([name, desc]) => `<tr>
+            <td><code style="font-size:12px">${escapeHtml(name)}</code></td>
+            <td>${escapeHtml(desc)}</td>
+          </tr>`).join("") + `</tbody>`;
+      }
+      $$(".copy-btn").forEach(btn => {
+        btn.onclick = async () => {
+          const key = btn.dataset.copy;
+          const val = get(CONTENT, key) || "";
+          try {
+            await navigator.clipboard.writeText(val);
+            const orig = btn.textContent;
+            btn.textContent = "Copied";
+            setTimeout(() => { btn.textContent = orig; }, 1200);
+          } catch {
+            toast("clipboard unavailable");
+          }
+        };
+      });
+    },
+
+    guide: () => {
+      $("#guide-content").innerHTML = GUIDE_HTML;
     },
 
     visualize: async () => {

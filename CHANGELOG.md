@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.6.1 — 2026-05-19
+
+UI polish from user feedback after the v0.6.0 demo.
+
+- **MCP page is now real** — was still showing "MCP integration arrives in
+  v0.3.0" from the original v0.2.0 content dict. Now shows the
+  `integrate claude` and `serve --transport sse` commands with copy
+  buttons, plus the full 11-tool table.
+- **Query page** — collection field is now a dropdown populated from
+  `/api/collections`, not a free-text input.
+- **Search page** — explicit Search button + Enter-to-submit; removed
+  the search-as-you-type debounce. Filter changes still re-run, but
+  only if there's already a query.
+- **New Guide page** — walks through every page in the nav with
+  concrete queries to try and a `try this:` callout per section.
+- **Bigger demo dataset** — `scripts/seed_demo.py` now produces ~185
+  articles across 8 categories (added science, music, gardening) so
+  the visualize page actually shows distinct clusters.
+- **Visualize copy fix** — removed "Visualization arrives in v0.4.0"
+  placeholder from the content dict; subtitle updated to reflect what
+  the page actually does (PCA scatter).
+
 ## 0.6.0 — 2026-05-19
 
 Polish pass — heartbeat, failed-job visibility, in-UI migrations, embedding visualization.

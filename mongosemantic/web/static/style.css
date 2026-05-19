@@ -521,6 +521,74 @@ pre#query-results {
   background: #F4F7F8;
 }
 
+/* code block with copy button — used on MCP page and Guide */
+.code-block {
+  position: relative;
+  background: #F4F7F8;
+  border: 1px solid var(--mdb-line);
+  border-radius: var(--r-md);
+  padding: 12px 16px;
+  margin: 8px 0 16px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  overflow-x: auto;
+}
+.code-block code { display: block; padding-right: 64px; color: var(--mdb-ink); }
+.copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px 10px;
+  font-size: 11px;
+  background: var(--mdb-surface);
+  color: var(--mdb-ink-muted);
+  border: 1px solid var(--mdb-line);
+  border-radius: var(--r-sm);
+}
+.copy-btn:hover {
+  background: var(--mdb-canvas);
+  color: var(--mdb-forest);
+  border-color: var(--mdb-line);
+  transform: none;
+  box-shadow: none;
+}
+
+/* guide page content */
+#guide-content {
+  max-width: 800px;
+}
+#guide-content h3 {
+  margin-top: 32px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--mdb-leaf);
+  display: inline-block;
+}
+#guide-content h4 {
+  margin-top: 20px;
+  margin-bottom: 6px;
+  font-size: 15px;
+  font-weight: 600;
+}
+#guide-content p { margin-bottom: 12px; color: var(--mdb-ink); }
+#guide-content ul { padding-left: 20px; margin-bottom: 12px; list-style: disc; }
+#guide-content li { margin-bottom: 6px; }
+#guide-content .try {
+  background: var(--mdb-leaf-tint);
+  padding: 12px 16px;
+  border-radius: var(--r-md);
+  border-left: 3px solid var(--mdb-forest);
+  margin: 8px 0 16px;
+  font-size: 13px;
+}
+#guide-content .try strong { color: var(--mdb-forest); }
+#guide-content code {
+  background: var(--mdb-canvas);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
 /* ---- indexing progress --------------------------------------------- */
 #indexing-progress {
   width: 100%;
