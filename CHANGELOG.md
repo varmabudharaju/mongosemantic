@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.6.0 — 2026-05-19
+
+Polish pass — heartbeat, failed-job visibility, in-UI migrations, embedding visualization.
+
+- `mongosemantic worker --once` drains the queue and exits. Useful for cron,
+  ad-hoc catch-up, and scripted demos.
+- Workers now write heartbeats to `mongosemantic_workers` every 10 seconds.
+  `status` and the dashboard show running / stale / dead state per worker
+  with last-heartbeat and jobs-processed counts.
+- `status` and the dashboard surface the 10 most-recent failed jobs with
+  their `last_error`, so a failed embed is actionable, not just a count.
+- Web `POST /api/collections/{name}/migrate` runs in a background thread
+  by default; new `GET .../migrate/progress` powers the in-UI progress
+  bar. CLI behavior unchanged.
+- Collections UI gets a per-row "Migrate model" action with a modal
+  (target-model dropdown, drop-archive toggle, polled progress).
+- New Visualize page: 2D PCA projection of sampled embeddings rendered
+  on `<canvas>`, hover for source snippet. Reads shadow rows or inline
+  `_msem` depending on the collection's mode.
+- New web endpoint `GET /api/collections/{name}/visualize?field=…&sample=…`
+  returns normalized (x, y) points + snippets.
+
 ## 0.5.0 — 2026-05-18
 
 - New `mongosemantic migrate -c X -m Y` command — switches a shadow-mode

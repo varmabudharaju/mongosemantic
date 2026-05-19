@@ -98,7 +98,7 @@ Eleven tools are exposed:
 | `get_schema_context` | Compact schema summary for AI-generated aggregations |
 | `migrate_model` | Switch a collection's embedding model with near-zero downtime |
 
-## Status (v0.5.0 — feature-complete roadmap)
+## Status (v0.6.0)
 
 - [x] Connect to Atlas / replica set / standalone
 - [x] Inspect a collection, score fields for suitability
@@ -112,6 +112,19 @@ Eleven tools are exposed:
 - [x] **MCP server** for Claude Desktop / Cursor / any MCP client (stdio + SSE)
 - [x] **Atlas hybrid search** — semantic + keyword via `$rankFusion` (`--hybrid` / UI toggle / `hybrid_search` MCP tool)
 - [x] **Online model migration** — `mongosemantic migrate` + `migrate_model` MCP tool, atomic `renameCollection` swap
+- [x] **Worker DX** — `worker --once` flag, heartbeat tracking, failed-job introspection in `status` and dashboard
+- [x] **Visualize page** — 2D PCA scatter of sampled embeddings, click-to-detail
+- [x] **Migrate modal in UI** — per-collection model swap with live progress polling
+
+## Known limitations
+
+- **Atlas paths are logically reviewed but not live-tested.** Vector index
+  creation, `$vectorSearch`, `$search`, `$rankFusion`, and the migration
+  index-name carry-over all work end-to-end against the self-hosted
+  replica set used by the integration tests. Reports against a real
+  Atlas cluster are welcome.
+- The visualize page projects sampled embeddings to 2D via PCA only. K-means
+  clustering with keyword labels (pgsemantic-style) is not in this release.
 
 ## Embedding models
 
