@@ -84,5 +84,7 @@ def build_hybrid_pipeline(
         {"$limit": limit},
         lookup_source_stage(source_collection),
         unwind_source_stage(),
-        base_projection({"$meta": "scoreDetails"}),
+        # Numeric fused score (sortable downstream). scoreDetails is a dict
+        # and would break commands/search.py's sort-by-score.
+        base_projection({"$meta": "score"}),
     ]
