@@ -17,6 +17,7 @@ from mongosemantic.commands import inspect as _inspect_mod  # noqa: E402
 from mongosemantic.commands import reindex as _reindex_mod  # noqa: E402
 from mongosemantic.commands import retry as _retry_mod  # noqa: E402
 from mongosemantic.commands import search as _search_mod  # noqa: E402
+from mongosemantic.commands import serve as _serve_mod  # noqa: E402
 from mongosemantic.commands import status as _status_mod  # noqa: E402
 from mongosemantic.commands import ui as _ui_mod  # noqa: E402
 
@@ -28,6 +29,7 @@ app.command("status")(_status_mod.status_cmd)
 app.command("retry")(_retry_mod.retry_cmd)
 app.command("reindex")(_reindex_mod.reindex_cmd)
 app.command("ui")(_ui_mod.ui_cmd)
+app.command("serve")(_serve_mod.serve_cmd)
 
 
 @app.command("worker")
