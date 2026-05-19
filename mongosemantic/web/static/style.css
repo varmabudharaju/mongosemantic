@@ -441,12 +441,53 @@ tbody tr:hover { background: var(--mdb-canvas); }
 }
 
 /* ---- search results ------------------------------------------------- */
-#search-q {
-  padding: 14px 16px;
-  font-size: 16px;
-  max-width: 100%;
-  margin-bottom: var(--space-3);
+/* Search bar: input + submit button as a single rounded container. */
+.searchbar {
+  display: flex;
+  align-items: center;
+  background: var(--mdb-surface);
+  border: 1px solid var(--mdb-line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1);
+  padding: 4px 4px 4px 14px;
+  margin: 0 0 var(--space-3);
+  transition: border-color var(--transition), box-shadow var(--transition);
 }
+.searchbar:focus-within {
+  border-color: var(--mdb-forest);
+  box-shadow: var(--shadow-1), 0 0 0 3px rgba(0, 104, 74, 0.12);
+}
+.searchbar-icon {
+  color: var(--mdb-ink-muted);
+  flex-shrink: 0;
+}
+.searchbar:focus-within .searchbar-icon { color: var(--mdb-forest); }
+.searchbar #search-q {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+  margin: 0;
+  padding: 12px 12px 12px 10px;
+  font-size: 16px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--mdb-ink);
+}
+.searchbar #search-q:focus {
+  outline: 0;
+  box-shadow: none;
+  border: 0;
+}
+/* Hide the native cancel button some browsers add to search inputs. */
+.searchbar #search-q::-webkit-search-cancel-button { -webkit-appearance: none; }
+.searchbar #search-go {
+  flex-shrink: 0;
+  padding: 10px 22px;
+  font-size: 14px;
+  border-radius: var(--r-md);
+}
+.searchbar #search-go:hover { transform: none; box-shadow: var(--shadow-2); }
 .search-controls {
   display: flex;
   gap: var(--space-4);
