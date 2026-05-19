@@ -18,6 +18,8 @@ mongosemantic index   --collection articles        # bulk-embed existing docs
 mongosemantic worker &                             # keep embeddings in sync
 mongosemantic search  "budget travel"              # search by meaning
 mongosemantic ui                                   # browser dashboard on :8080
+mongosemantic integrate claude                     # wire into Claude Desktop
+mongosemantic serve                                # MCP server for AI agents
 ```
 
 ## Web dashboard
@@ -39,7 +41,28 @@ The dashboard provides:
 - Read-only aggregation runner (10s timeout, 100-doc limit)
 - Job queue dashboard with retry / reindex
 
-## Status (v0.2.0)
+## MCP — let Claude Desktop / Cursor query your MongoDB
+
+```bash
+mongosemantic integrate claude          # writes Claude Desktop config (restart Claude)
+mongosemantic serve --transport sse     # or run as a standalone SSE server on :8090
+```
+
+Nine tools are exposed:
+
+| Tool | What it does |
+|---|---|
+| `semantic_search` | Find rows in one collection by meaning |
+| `search_all_collections` | Same, fanned out across every configured collection |
+| `list_collections` | Every collection + its configured/not-configured status |
+| `list_configured` | Just the ones with semantic search wired up |
+| `inspect_collection` | Field-by-field suitability scoring |
+| `get_sample_documents` | Real rows, embedding sub-doc stripped |
+| `get_status` | Topology + total embeddings + job-queue counts |
+| `safe_aggregation` | Read-only pipeline runner (10s, 100-row, no `$out`/`$merge`/`$function`) |
+| `get_schema_context` | Compact schema summary for AI-generated aggregations |
+
+## Status (v0.3.0)
 
 - [x] Connect to Atlas / replica set / standalone
 - [x] Inspect a collection, score fields for suitability
@@ -48,9 +71,9 @@ The dashboard provides:
 - [x] Bulk-embed existing documents
 - [x] Sync in real time (change streams) or on a schedule (polling)
 - [x] Search via native Atlas `$vectorSearch` or brute-force aggregation
-- [x] CLI: inspect / apply / index / search / worker / status / retry / reindex / **ui**
-- [x] **Web UI** with seven pages and a safe aggregation runner
-- [ ] MCP server for AI agents _(v0.3.0)_
+- [x] CLI: inspect / apply / index / search / worker / status / retry / reindex / **ui** / **serve** / **integrate**
+- [x] Web UI with seven pages and a safe aggregation runner
+- [x] **MCP server** for Claude Desktop / Cursor / any MCP client (stdio + SSE)
 - [ ] Atlas hybrid search (semantic + keyword) _(v0.4.0)_
 - [ ] Zero-downtime model migration _(v0.5.0)_
 
