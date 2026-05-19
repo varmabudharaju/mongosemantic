@@ -3,7 +3,7 @@ expected tools, and expose JSON schemas we can hand to a client."""
 import asyncio
 
 
-def test_create_mcp_registers_all_ten_tools():
+def test_create_mcp_registers_all_eleven_tools():
     from mongosemantic.mcp_server import create_mcp
     app = create_mcp()
     tools = asyncio.run(app.list_tools())
@@ -19,6 +19,7 @@ def test_create_mcp_registers_all_ten_tools():
         "search_all_collections",
         "safe_aggregation",
         "get_schema_context",
+        "migrate_model",
     }
 
 

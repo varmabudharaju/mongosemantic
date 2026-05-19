@@ -16,6 +16,7 @@ from mongosemantic.db.client import Topology
 from mongosemantic.db.schema import inspect_collection as _inspect
 from mongosemantic.db.schema import score_field
 from mongosemantic.embeddings.provider import get_provider
+from mongosemantic.migration import MigrationError, migrate_collection
 from mongosemantic.search.cross_collection import (
     min_max_normalize,
     per_collection_targets,
@@ -264,6 +265,28 @@ def t_safe_aggregation(db: Database, name: str, pipeline: list[dict]) -> dict:
         "rows": rows,
         "limit": MAX_AGG_DOCS,
         "truncated": len(rows) >= MAX_AGG_DOCS,
+    }
+
+
+# -----------------------------------------------------------------------------
+# Tool: migrate_model
+# -----------------------------------------------------------------------------
+def t_migrate_model(conn, collection: str, new_model: str) -> dict:
+    try:
+        result = migrate_collection(conn, collection, new_model)
+    except MigrationError as e:
+        raise ValueError(str(e)) from e
+    return {
+        "collection": result.collection,
+        "old_model": result.old_model,
+        "new_model": result.new_model,
+        "old_dim": result.old_dim,
+        "new_dim": result.new_dim,
+        "documents": result.documents,
+        "chunks_written": result.chunks_written,
+        "archive_collection": result.archive_collection,
+        "started_at": result.started_at.isoformat(),
+        "finished_at": result.finished_at.isoformat(),
     }
 
 

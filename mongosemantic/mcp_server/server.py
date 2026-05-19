@@ -152,6 +152,22 @@ def create_mcp() -> FastMCP:
             conn.close()
 
     @app.tool()
+    def migrate_model(collection: str, new_model: str) -> dict:
+        """Switch an existing collection's embedding model with near-zero downtime.
+
+        Builds new embeddings into a temporary shadow collection, then
+        atomically renames it into place. The old shadow is preserved as
+        `{name}_archive_{timestamp}` for rollback — drop it manually once
+        you've verified the new model. Shadow-mode collections only;
+        inline-mode is rejected.
+        """
+        conn = _open()
+        try:
+            return t.t_migrate_model(conn, collection, new_model)
+        finally:
+            conn.close()
+
+    @app.tool()
     def safe_aggregation(name: str, pipeline: list[dict]) -> dict:
         """Run a read-only MongoDB aggregation pipeline against `name`.
 

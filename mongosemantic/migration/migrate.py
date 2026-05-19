@@ -39,6 +39,8 @@ from mongosemantic.db.indexes import (
     create_atlas_search_index,
     create_atlas_vector_index,
     ensure_shadow_indexes,
+)
+from mongosemantic.db.indexes import (
     vector_index_name as canonical_vector_index_name,
 )
 from mongosemantic.embeddings.provider import get_provider
@@ -132,7 +134,7 @@ def _embed_one_doc(
         texts = [c[2] for c in new_chunks]
         vectors = provider.embed_batch(texts)
         now = datetime.now(timezone.utc)
-        for (_job_idx, shadow_idx, chunk_text_val, hash_val), vec in zip(new_chunks, vectors):
+        for (_job_idx, shadow_idx, chunk_text_val, hash_val), vec in zip(new_chunks, vectors, strict=True):
             db[temp_shadow].update_one(
                 {
                     "source_id": source_id,
