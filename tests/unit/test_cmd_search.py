@@ -94,6 +94,21 @@ def test_run_one_searches_every_configured_field():
     assert {r["field_path"] for r in rows} == {"title", "body"}
 
 
+def test_resolved_vector_index_name_prefers_stored_over_computed():
+    """v0.5.0 migrations rename indexes; search must honor the renamed name."""
+    from mongosemantic.commands.search import _resolved_vector_index_name
+    from mongosemantic.db.indexes import vector_index_name
+    cfg = _multi_field_cfg()
+    computed = vector_index_name(cfg.collection, "title")
+    # No stored override → computed
+    assert _resolved_vector_index_name(cfg, "title") == computed
+    # Stored override wins
+    cfg.vector_index_names = {"title": "renamed_after_migration"}
+    assert _resolved_vector_index_name(cfg, "title") == "renamed_after_migration"
+    # Fallback for fields not in the dict
+    assert _resolved_vector_index_name(cfg, "body") == vector_index_name(cfg.collection, "body")
+
+
 def test_run_one_merges_and_top_k_across_fields():
     """When fields each return rows, results merge, sort by score desc, then top-limit."""
     db = mongomock.MongoClient()["d"]

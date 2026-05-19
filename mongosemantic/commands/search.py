@@ -18,10 +18,18 @@ from mongosemantic.state import load_config
 
 console = Console()
 
+def _resolved_vector_index_name(cfg, field_path: str) -> str:
+    """Prefer the per-field name stored in cfg (migrations may have changed it);
+    fall back to the deterministic name for legacy configs."""
+    stored = (cfg.vector_index_names or {}).get(field_path)
+    return stored or vector_index_name(cfg.collection, field_path)
+
+
 def _run_one_field(
     db, cfg, collection: str, field_path: str, query_vec: list[float],
     limit: int, topology: Topology,
 ):
+    idx_name = _resolved_vector_index_name(cfg, field_path)
     if cfg.mode == "inline":
         target = db[collection]
         if topology == Topology.ATLAS and atlas_vector_index_exists(target, collection, field_path):
@@ -29,7 +37,7 @@ def _run_one_field(
                 field_path=field_path,
                 query_vector=query_vec,
                 limit=limit,
-                index_name=vector_index_name(collection, field_path),
+                index_name=idx_name,
             )
         else:
             pipeline = build_inline_brute_pipeline(
@@ -45,7 +53,7 @@ def _run_one_field(
                 field_path=field_path,
                 query_vector=query_vec,
                 limit=limit,
-                index_name=vector_index_name(collection, field_path),
+                index_name=idx_name,
             )
         else:
             pipeline = build_brute_pipeline(
@@ -80,14 +88,15 @@ def _run_hybrid_field(
     query_vec: list[float], limit: int,
 ):
     shadow = db[cfg.shadow_collection]
+    stored_search = (cfg.search_index_names or {}).get(field_path)
     pipeline = build_hybrid_pipeline(
         source_collection=collection,
         field_path=field_path,
         query_text=query_text,
         query_vector=query_vec,
         limit=limit,
-        vector_index_name=vector_index_name(collection, field_path),
-        search_index_name=search_index_name(collection, field_path),
+        vector_index_name=_resolved_vector_index_name(cfg, field_path),
+        search_index_name=stored_search or search_index_name(collection, field_path),
     )
     rows = list(shadow.aggregate(pipeline))
     for r in rows:
