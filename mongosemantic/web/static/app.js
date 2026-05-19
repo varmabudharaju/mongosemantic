@@ -97,13 +97,19 @@
           <th>${escapeHtml(CONTENT.collections.col_status)}</th>
           <th></th>
         </tr></thead>`;
-        const rows = data.collections.map(c => `<tr>
-          <td>${escapeHtml(c.name)}</td>
-          <td>${c.status === "configured"
-            ? escapeHtml(CONTENT.collections.status_configured.replace("{n}", c.fields_count))
-            : escapeHtml(CONTENT.collections.status_not_configured)}</td>
-          <td><a href="#/inspect/${encodeURIComponent(c.name)}">${escapeHtml(CONTENT.collections.row_action)}</a></td>
-        </tr>`).join("");
+        const rows = data.collections.map(c => {
+          const isConf = c.status === "configured";
+          const pill = `<span class="status ${isConf ? "configured" : ""}">${
+            isConf
+              ? escapeHtml(CONTENT.collections.status_configured.replace("{n}", c.fields_count))
+              : escapeHtml(CONTENT.collections.status_not_configured)
+          }</span>`;
+          return `<tr>
+            <td><strong>${escapeHtml(c.name)}</strong></td>
+            <td>${pill}</td>
+            <td style="text-align:right"><a href="#/inspect/${encodeURIComponent(c.name)}">${escapeHtml(CONTENT.collections.row_action)}</a></td>
+          </tr>`;
+        }).join("");
         tbl.innerHTML = head + "<tbody>" + rows + "</tbody>";
       } catch (e) { toast(e.message); }
     },
@@ -199,9 +205,12 @@
       const c = CONTENT.search;
       const empty = $("#search-empty");
       const results = $("#search-results");
+      const notice = $("#search-notice");
       empty.textContent = c.empty_no_query;
       results.innerHTML = "";
+      notice.textContent = "";
       const sel = $("#search-collection");
+      const hybridBox = $("#search-hybrid");
       try {
         const cols = await fetchJson("GET", "/api/collections");
         sel.innerHTML = `<option value="">${escapeHtml(c.selector_all)}</option>` +
@@ -211,26 +220,39 @@
       const input = $("#search-q");
       input.placeholder = c.placeholder;
       let timer;
-      input.oninput = () => {
+      const run = () => {
         clearTimeout(timer);
         timer = setTimeout(async () => {
           const q = input.value.trim();
-          if (!q) { results.innerHTML = ""; empty.textContent = c.empty_no_query; return; }
+          if (!q) {
+            results.innerHTML = ""; notice.textContent = "";
+            empty.textContent = c.empty_no_query; return;
+          }
           const params = new URLSearchParams({ q });
           if (sel.value) params.set("collection", sel.value);
+          if (hybridBox.checked) params.set("hybrid", "true");
           try {
             const r = await fetchJson("GET", "/api/search?" + params.toString());
+            notice.textContent = r.notice || "";
             if (!r.rows.length) { empty.textContent = c.empty_no_results; results.innerHTML = ""; return; }
             empty.textContent = "";
             results.innerHTML = r.rows.map(row => `<li>
               <strong>${(row.score || 0).toFixed(3)}</strong>
-              <span>${escapeHtml(row.source_collection)}</span>
-              <span>${escapeHtml(row.field_path)}</span>
-              <p>${escapeHtml((row.chunk_text || "").slice(0, 300))}</p>
+              <div>
+                <div class="meta">
+                  <span class="coll">${escapeHtml(row.source_collection)}</span>
+                  <span>·</span>
+                  <span>${escapeHtml(row.field_path)}</span>
+                </div>
+                <p>${escapeHtml((row.chunk_text || "").slice(0, 300))}</p>
+              </div>
             </li>`).join("");
           } catch (e) { toast(e.message); }
         }, 300);
       };
+      input.oninput = run;
+      sel.onchange = run;
+      hybridBox.onchange = run;
     },
 
     query: async () => {
@@ -258,13 +280,21 @@
     dashboard: async () => {
       try {
         const d = await fetchJson("GET", "/api/dashboard");
-        $("#dashboard-cards").innerHTML = `
-          <div><strong>${d.configured_count}</strong><br>${escapeHtml(CONTENT.dashboard.card_collections)}</div>
-          <div><strong>${d.total_embeddings}</strong><br>${escapeHtml(CONTENT.dashboard.card_total_embeddings)}</div>
-          <div><strong>${d.jobs.pending || 0}</strong><br>${escapeHtml(CONTENT.dashboard.card_pending)}</div>
-          <div><strong>${d.jobs.failed || 0}</strong><br>${escapeHtml(CONTENT.dashboard.card_failed)}</div>
-          <div><strong>${d.topology}</strong><br>topology</div>
-        `;
+        const card = (label, value, sub, accent) => `
+          <div>
+            <span class="label">${escapeHtml(label)}</span>
+            <span class="value ${accent ? "accent" : ""}">${escapeHtml(String(value))}</span>
+            ${sub ? `<span class="sublabel">${escapeHtml(sub)}</span>` : ""}
+          </div>`;
+        $("#dashboard-cards").innerHTML = [
+          card(CONTENT.dashboard.card_collections, d.configured_count, "", true),
+          card(CONTENT.dashboard.card_total_embeddings, d.total_embeddings, "", true),
+          card(CONTENT.dashboard.card_pending, d.jobs.pending || 0,
+               (d.jobs.pending || 0) > 0 ? "waiting on worker" : "queue clear"),
+          card(CONTENT.dashboard.card_failed, d.jobs.failed || 0,
+               (d.jobs.failed || 0) > 0 ? "retry from below" : "no failures"),
+          card("Topology", d.topology.replace("_", " "), `${d.configured.length} configured`),
+        ].join("");
       } catch (e) { toast(e.message); }
       $("#dashboard-retry").onclick = async () => {
         try {
