@@ -138,6 +138,12 @@ def apply_cmd(
                     f"[red]apply failed for {len(failed)} of {len(fields)} field(s); "
                     f"succeeded: {succeeded or 'none'}; failed: {[f for f, _ in failed]}[/red]"
                 )
+                if succeeded:
+                    console.print(
+                        f"[yellow]Indexes for {succeeded} are already created and remain in "
+                        f"place. Re-run `apply` after freeing index slots (or run `teardown` "
+                        f"first) to reach a clean state.[/yellow]"
+                    )
                 if hit_fts_cap:
                     console.print(
                         "[yellow]Atlas free tier (M0/M2/M5) limits search indexes to 3 per "

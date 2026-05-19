@@ -91,6 +91,67 @@ def test_apply_atlas_partial_index_failure_exits_non_zero_and_explains(monkeypat
     assert "vector:plot" in call_log  # attempted (and failed)
 
 
+def test_apply_atlas_all_fields_fail_summary_says_none_succeeded(monkeypatch):
+    """When every field fails, the summary must say 'succeeded: none' rather
+    than printing an empty list. Belt-and-suspenders for an ugly format that
+    could otherwise read 'succeeded: []' in the user's terminal."""
+    _patch_env(monkeypatch)
+    fake_db = mongomock.MongoClient()["d"]
+    fake_conn = MagicMock()
+    fake_conn.db = fake_db
+    from mongosemantic.db.client import Topology
+    fake_conn.topology = Topology.ATLAS
+
+    def fail_all(*args, **kwargs):
+        raise RuntimeError("synthetic Atlas failure for every field")
+
+    with (
+        patch("mongosemantic.commands.apply.MongoConnection.open", return_value=fake_conn),
+        patch("mongosemantic.commands.apply.create_atlas_vector_index", side_effect=fail_all),
+        patch("mongosemantic.commands.apply.create_atlas_search_index", side_effect=fail_all),
+    ):
+        r = runner.invoke(
+            app,
+            ["apply", "--collection", "embedded_movies",
+             "--field", "title", "--field", "plot",
+             "--mode", "shadow"],
+        )
+
+    assert r.exit_code != 0, r.output
+    assert "succeeded: none" in r.output.lower()
+
+
+def test_apply_atlas_inline_mode_partial_failure_also_exits_non_zero(monkeypatch):
+    """Inline mode uses a different code path inside the per-field loop —
+    confirm it surfaces failures the same way as shadow mode."""
+    _patch_env(monkeypatch)
+    fake_db = mongomock.MongoClient()["d"]
+    fake_conn = MagicMock()
+    fake_conn.db = fake_db
+    from mongosemantic.db.client import Topology
+    fake_conn.topology = Topology.ATLAS
+
+    def fake_vector(target, collection, field_path, dim, path="embedding"):
+        if field_path == "plot":
+            raise RuntimeError("synthetic Atlas failure on inline plot")
+        return f"mongosemantic_{collection}_{field_path}_v"
+
+    with (
+        patch("mongosemantic.commands.apply.MongoConnection.open", return_value=fake_conn),
+        patch("mongosemantic.commands.apply.create_atlas_vector_index", side_effect=fake_vector),
+    ):
+        r = runner.invoke(
+            app,
+            ["apply", "--collection", "embedded_movies",
+             "--field", "title", "--field", "plot",
+             "--mode", "inline"],
+        )
+
+    assert r.exit_code != 0, r.output
+    assert "plot" in r.output
+    assert "remain in place" in r.output  # partial-state hint fired
+
+
 def test_apply_rejects_chunk_with_inline(monkeypatch):
     """--chunked is incompatible with --mode inline; reject loudly, don't silently downgrade."""
     _patch_env(monkeypatch)
