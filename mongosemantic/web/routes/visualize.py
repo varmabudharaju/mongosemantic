@@ -18,7 +18,11 @@ from mongosemantic.web.identifiers import IdentifierError, validate_identifier
 
 router = APIRouter()
 
-MAX_SAMPLE = 5000
+# Sampling cap. PCA itself scales fine; the limiter here is the JSON payload
+# back to the browser (~200 bytes per point including the text snippet).
+# 50 000 points is ~10 MB which loads fine on a local network; if you push
+# this much higher consider streaming or downsampling client-side.
+MAX_SAMPLE = 50_000
 MIN_FOR_PCA = 3
 
 

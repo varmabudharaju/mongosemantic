@@ -259,11 +259,21 @@
           <li>Hover any dot to see its source text snippet.</li>
           <li>Look for visual clusters — they correspond to semantically similar groups of documents.</li>
         </ol>
-        <span class="try-line"><strong>Try on <code>movies</code>:</strong> distinct clusters for action, romance, war, comedy emerge from 23k unlabeled plots.</span>
+        <span class="try-line"><strong>Tip:</strong> increase the <em>Sample</em> dropdown for richer clusters — 5k is the sweet spot, 50k loads every embedding (slower but shows the full structure).</span>
       </aside>
       <div class="search-controls">
         <select id="viz-collection"></select>
         <select id="viz-field"></select>
+        <label style="display:inline-flex;align-items:center;gap:6px;margin:0;font-size:13px;color:var(--mdb-ink-muted)">
+          Sample
+          <select id="viz-sample">
+            <option value="1000">1k (fast)</option>
+            <option value="5000" selected>5k</option>
+            <option value="10000">10k</option>
+            <option value="20000">20k</option>
+            <option value="50000">50k (all)</option>
+          </select>
+        </label>
         <button id="viz-refresh" class="ghost">Refresh</button>
       </div>
       <p id="viz-meta"></p>
