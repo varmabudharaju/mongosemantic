@@ -71,6 +71,115 @@
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 
+  // ---- visualize scatter -------------------------------------------------
+  let _vizPoints = [];
+  function drawScatter(points) {
+    _vizPoints = points;
+    const canvas = $("#viz-canvas");
+    if (!canvas) return;
+    // Snap canvas pixel dims to CSS dims for crisp drawing.
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.floor(rect.width * dpr);
+    canvas.height = Math.floor(rect.height * dpr);
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, rect.width, rect.height);
+    ctx.fillStyle = "rgba(0,104,74,0.55)";
+    ctx.strokeStyle = "rgba(0,30,43,0.6)";
+    ctx.lineWidth = 0.5;
+    const pad = 24;
+    const w = rect.width - 2 * pad, h = rect.height - 2 * pad;
+    points.forEach(p => {
+      const cx = pad + p.x * w;
+      const cy = pad + (1 - p.y) * h;  // flip y so larger PCA-y = up
+      ctx.beginPath();
+      ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    });
+    // Tooltip on hover.
+    const tooltip = $("#viz-tooltip");
+    canvas.onmousemove = (ev) => {
+      const r = canvas.getBoundingClientRect();
+      const mx = ev.clientX - r.left, my = ev.clientY - r.top;
+      let nearest = null, nearestDist = 12; // px threshold
+      for (const p of _vizPoints) {
+        const cx = pad + p.x * (r.width - 2 * pad);
+        const cy = pad + (1 - p.y) * (r.height - 2 * pad);
+        const d = Math.hypot(cx - mx, cy - my);
+        if (d < nearestDist) { nearest = { p, cx, cy }; nearestDist = d; }
+      }
+      if (nearest) {
+        tooltip.style.display = "block";
+        tooltip.style.left = (nearest.cx + 14) + "px";
+        tooltip.style.top  = (nearest.cy + 14) + "px";
+        tooltip.textContent = nearest.p.text || nearest.p.id;
+      } else {
+        tooltip.style.display = "none";
+      }
+    };
+    canvas.onmouseleave = () => { tooltip.style.display = "none"; };
+  }
+
+  // ---- migrate modal ----------------------------------------------------
+  let _migratePollTimer = null;
+  function openMigrateModal(name, mode) {
+    const modal = $("#migrate-modal");
+    $("#migrate-target").textContent =
+      `${name} — ${mode === "inline" ? "inline mode is not supported for migration" : "shadow mode, near-zero downtime"}`;
+    $("#migrate-progress").style.display = "none";
+    $("#migrate-progress").value = 0;
+    $("#migrate-state").textContent = "";
+    $("#migrate-go").disabled = (mode === "inline");
+    modal.hidden = false;
+
+    $("#migrate-cancel").onclick = () => {
+      if (_migratePollTimer) clearInterval(_migratePollTimer);
+      modal.hidden = true;
+    };
+    $("#migrate-go").onclick = async () => {
+      const model = $("#migrate-model").value;
+      const drop = $("#migrate-drop").checked;
+      $("#migrate-go").disabled = true;
+      $("#migrate-progress").style.display = "block";
+      $("#migrate-state").textContent = "starting…";
+      try {
+        await fetchJson("POST", `/api/collections/${encodeURIComponent(name)}/migrate`,
+          { model, drop_archive: drop, background: true });
+      } catch (e) {
+        $("#migrate-state").textContent = "failed: " + e.message;
+        $("#migrate-go").disabled = false;
+        return;
+      }
+      if (_migratePollTimer) clearInterval(_migratePollTimer);
+      _migratePollTimer = setInterval(async () => {
+        try {
+          const p = await fetchJson("GET", `/api/collections/${encodeURIComponent(name)}/migrate/progress`);
+          if (p.total > 0) {
+            $("#migrate-progress").max = p.total;
+            $("#migrate-progress").value = p.processed || 0;
+          }
+          $("#migrate-state").textContent =
+            `${p.state} · ${p.processed || 0}/${p.total || "?"}` + (p.target_model ? ` → ${p.target_model}` : "");
+          if (p.state === "succeeded" || p.state === "failed") {
+            clearInterval(_migratePollTimer);
+            _migratePollTimer = null;
+            if (p.state === "succeeded") {
+              toast(`Migrated ${name} to ${p.new_model}.`);
+              setTimeout(() => { modal.hidden = true; handlers.collections(); }, 600);
+            } else {
+              $("#migrate-state").textContent = "failed: " + (p.error || "unknown");
+              $("#migrate-go").disabled = false;
+            }
+          }
+        } catch (e) {
+          $("#migrate-state").textContent = "poll error: " + e.message;
+        }
+      }, 700);
+    };
+  }
+
   const route = () => {
     const hash = (location.hash || "#/connection").replace(/^#\//, "").split("/");
     const [page, ...args] = hash;
@@ -95,6 +204,7 @@
         const head = `<thead><tr>
           <th>${escapeHtml(CONTENT.collections.col_collection)}</th>
           <th>${escapeHtml(CONTENT.collections.col_status)}</th>
+          <th>Model</th>
           <th></th>
         </tr></thead>`;
         const rows = data.collections.map(c => {
@@ -104,13 +214,29 @@
               ? escapeHtml(CONTENT.collections.status_configured.replace("{n}", c.fields_count))
               : escapeHtml(CONTENT.collections.status_not_configured)
           }</span>`;
+          const model = c.embedding_model
+            ? `<code style="font-size:12px">${escapeHtml(c.embedding_model)}</code> <small>(${escapeHtml(c.mode || "")})</small>`
+            : `<small>—</small>`;
+          const actions = isConf
+            ? `<a href="#/inspect/${encodeURIComponent(c.name)}">Inspect</a>
+               &nbsp;·&nbsp;
+               <a href="#" data-migrate="${escapeHtml(c.name)}" data-mode="${escapeHtml(c.mode || "")}">Migrate model</a>`
+            : `<a href="#/inspect/${encodeURIComponent(c.name)}">${escapeHtml(CONTENT.collections.row_action)}</a>`;
           return `<tr>
             <td><strong>${escapeHtml(c.name)}</strong></td>
             <td>${pill}</td>
-            <td style="text-align:right"><a href="#/inspect/${encodeURIComponent(c.name)}">${escapeHtml(CONTENT.collections.row_action)}</a></td>
+            <td>${model}</td>
+            <td style="text-align:right">${actions}</td>
           </tr>`;
         }).join("");
         tbl.innerHTML = head + "<tbody>" + rows + "</tbody>";
+        // Wire the per-row migrate action.
+        $$("a[data-migrate]", tbl).forEach(a => {
+          a.onclick = (ev) => {
+            ev.preventDefault();
+            openMigrateModal(a.dataset.migrate, a.dataset.mode);
+          };
+        });
       } catch (e) { toast(e.message); }
     },
 
@@ -295,6 +421,39 @@
                (d.jobs.failed || 0) > 0 ? "retry from below" : "no failures"),
           card("Topology", d.topology.replace("_", " "), `${d.configured.length} configured`),
         ].join("");
+
+        // Workers
+        const wTbl = $("#dashboard-workers");
+        if ((d.workers || []).length === 0) {
+          wTbl.innerHTML = `<tbody><tr><td><small>No workers seen recently. Run <code>mongosemantic worker</code>.</small></td></tr></tbody>`;
+        } else {
+          wTbl.innerHTML = `<thead><tr>
+            <th>Worker</th><th>Status</th><th>Last heartbeat</th><th style="text-align:right">Jobs</th>
+          </tr></thead><tbody>` + d.workers.map(w => `<tr>
+            <td><code style="font-size:12px">${escapeHtml(w.worker_id)}</code></td>
+            <td><span class="status ${w.status === "running" ? "configured" : ""}">${escapeHtml(w.status)}</span></td>
+            <td><small>${escapeHtml(w.last_heartbeat.replace("T", " ").slice(0, 19))}</small></td>
+            <td style="text-align:right">${w.jobs_processed}</td>
+          </tr>`).join("") + `</tbody>`;
+        }
+
+        // Failed jobs
+        const failed = d.recent_failed || [];
+        const failedEl = $("#dashboard-failed");
+        if (failed.length === 0) {
+          failedEl.innerHTML = `<p style="color:var(--mdb-ink-muted);font-size:13px">No recent failures.</p>`;
+        } else {
+          failedEl.innerHTML = `<div class="table-wrap"><table>
+            <thead><tr><th>Collection</th><th>Field</th><th>Source</th><th>Attempts</th><th>Error</th></tr></thead>
+            <tbody>${failed.map(f => `<tr>
+              <td>${escapeHtml(f.collection || "-")}</td>
+              <td>${escapeHtml(f.field_path || "-")}</td>
+              <td><code style="font-size:12px">${escapeHtml((f.source_id || "-").toString().slice(0, 24))}</code></td>
+              <td>${f.attempts || 0}</td>
+              <td><small>${escapeHtml((f.last_error || "").split("\\n")[0].slice(0, 120))}</small></td>
+            </tr>`).join("")}</tbody>
+          </table></div>`;
+        }
       } catch (e) { toast(e.message); }
       $("#dashboard-retry").onclick = async () => {
         try {
@@ -305,7 +464,52 @@
       };
     },
 
-    visualize() { },
+    visualize: async () => {
+      const sel = $("#viz-collection");
+      const fieldSel = $("#viz-field");
+      const meta = $("#viz-meta");
+      const empty = $("#viz-empty");
+      try {
+        const cols = await fetchJson("GET", "/api/collections");
+        const configured = cols.collections.filter(c => c.status === "configured");
+        if (!configured.length) {
+          empty.textContent = "No collections configured yet — set one up first.";
+          sel.innerHTML = "";
+          return;
+        }
+        empty.textContent = "";
+        sel.innerHTML = configured.map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join("");
+      } catch (e) { toast(e.message); return; }
+
+      const render = async () => {
+        const name = sel.value;
+        if (!name) return;
+        const params = new URLSearchParams();
+        if (fieldSel.value) params.set("field", fieldSel.value);
+        params.set("sample", "1000");
+        try {
+          const v = await fetchJson("GET", `/api/collections/${encodeURIComponent(name)}/visualize?${params}`);
+          // Populate field dropdown (only when first loading or after collection change)
+          if (fieldSel.dataset.collection !== name) {
+            fieldSel.dataset.collection = name;
+            fieldSel.innerHTML = (v.available_fields || []).map(
+              f => `<option value="${escapeHtml(f)}" ${f === v.field ? "selected" : ""}>${escapeHtml(f)}</option>`
+            ).join("");
+          }
+          if (v.message) {
+            meta.textContent = v.message;
+            drawScatter([]);
+            return;
+          }
+          meta.textContent = `${v.points.length} points · ${v.embedding_dim}-d → PCA to 2D`;
+          drawScatter(v.points);
+        } catch (e) { toast(e.message); }
+      };
+      sel.onchange = () => { fieldSel.dataset.collection = ""; render(); };
+      fieldSel.onchange = render;
+      $("#viz-refresh").onclick = render;
+      await render();
+    },
     mcp() { },
   };
 

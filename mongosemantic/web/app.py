@@ -14,6 +14,7 @@ from mongosemantic.web.routes import migrate as _migrate_routes
 from mongosemantic.web.routes import search as _search_routes
 from mongosemantic.web.routes import system as _system_routes
 from mongosemantic.web.routes import ui as _ui_routes
+from mongosemantic.web.routes import visualize as _visualize_routes
 from mongosemantic.web.security import (
     install_csrf,
     install_rate_limit,
@@ -49,6 +50,7 @@ def create_app() -> FastAPI:
     app.include_router(_aggregation_routes.router)
     app.include_router(_dashboard_routes.router)
     app.include_router(_migrate_routes.router)
+    app.include_router(_visualize_routes.router)
     _ui_routes.install(app)
 
     return app
