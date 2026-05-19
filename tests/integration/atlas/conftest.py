@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import time
 
+import certifi
 import pytest
 from pymongo import MongoClient
 from pymongo.collection import Collection
@@ -20,7 +21,12 @@ def atlas_uri() -> str:
 
 @pytest.fixture(scope="session")
 def atlas_client(atlas_uri: str) -> MongoClient:
-    client = MongoClient(atlas_uri, serverSelectionTimeoutMS=10000)
+    # Mirror the tlsCAFile default we apply in MongoConnection.open so the
+    # fixture works on systems without a discoverable system CA bundle.
+    kwargs: dict = {"serverSelectionTimeoutMS": 10000}
+    if "tlsCAFile" not in atlas_uri:
+        kwargs["tlsCAFile"] = certifi.where()
+    client = MongoClient(atlas_uri, **kwargs)
     client.admin.command("hello")  # surface auth/allowlist failures immediately
     yield client
     client.close()
@@ -36,12 +42,16 @@ def atlas_topology(atlas_client: MongoClient, atlas_uri: str) -> Topology:
 
 @pytest.fixture(scope="session")
 def atlas_db_name() -> str:
-    return "sample_airbnb"
+    return "sample_mflix"
 
 
 @pytest.fixture(scope="session")
 def atlas_collection_name() -> str:
-    return "listingsAndReviews"
+    # embedded_movies (~3,483 docs) over movies (~21k): Atlas per-doc latency
+    # makes indexing the full movies corpus impractical for a verification
+    # suite (~1 hour vs ~5 min). embedded_movies is Atlas's curated
+    # vector-search demo subset and has the same field shape.
+    return "embedded_movies"
 
 
 @pytest.fixture(scope="session")
@@ -50,9 +60,9 @@ def atlas_dataset_loaded(
 ) -> Collection:
     coll = atlas_client[atlas_db_name][atlas_collection_name]
     count = coll.estimated_document_count()
-    if count < 5000:
+    if count < 3000:
         pytest.fail(
-            f"{atlas_db_name}.{atlas_collection_name} has {count} docs (need >= 5000).\n"
+            f"{atlas_db_name}.{atlas_collection_name} has {count} docs (need >= 3000).\n"
             "In the Atlas console: Database -> '...' -> Load Sample Dataset."
         )
     return coll
