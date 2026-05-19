@@ -73,6 +73,29 @@ def test_pipeline_includes_source_lookup_and_score():
     assert "score" in proj["$project"]
 
 
+def test_pipeline_projects_numeric_score_not_score_details():
+    """Regression: the final $project must surface the *numeric* rankFusion
+    score under `score`, not the `scoreDetails` document. Sorting hybrid
+    results by `score` downstream (in commands/search.py) will raise
+    `TypeError: '<' not supported between instances of 'dict' and 'dict'`
+    if `score` is a dict."""
+    p = build_hybrid_pipeline(
+        source_collection="articles",
+        field_path="body",
+        query_text="q",
+        query_vector=[0.0, 0.0, 0.0],
+        limit=10,
+        vector_index_name="v",
+        search_index_name="s",
+    )
+    proj = next(s for s in p if "$project" in s)
+    score_expr = proj["$project"]["score"]
+    assert score_expr == {"$meta": "score"}, (
+        f"hybrid $project must surface numeric score, got {score_expr!r}; "
+        "scoreDetails is a dict and breaks downstream sort"
+    )
+
+
 def test_pipeline_weights_default_to_balanced():
     p = build_hybrid_pipeline(
         source_collection="x", field_path="b", query_text="q",
