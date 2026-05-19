@@ -79,3 +79,10 @@ def disable_config(db: Database, collection: str) -> None:
     db[CONFIG_COLLECTION].update_one(
         {"_id": collection}, {"$set": {"disabled": True, "updated_at": datetime.utcnow()}}
     )
+
+
+def delete_config(db: Database, collection: str) -> None:
+    """Hard-remove the config document. Used by teardown so a subsequent
+    apply starts from a clean slate (different from disable_config, which
+    keeps the row around as a soft-deleted history record)."""
+    db[CONFIG_COLLECTION].delete_one({"_id": collection})

@@ -7,6 +7,7 @@ from mongosemantic.config import Settings
 from mongosemantic.db.client import MongoConnection
 from mongosemantic.state import (
     count_by_status,
+    delete_config,
     ensure_indexes,
     list_configured,
     list_heartbeats,
@@ -98,6 +99,38 @@ def retry_failed() -> dict:
 
 class ReindexRequest(BaseModel):
     collection: str
+
+
+class TeardownRequest(BaseModel):
+    drop_data: bool = True
+
+
+@router.post("/api/collections/{name}/teardown")
+def teardown(name: str, req: TeardownRequest = TeardownRequest()) -> dict:
+    from mongosemantic.web.identifiers import IdentifierError, validate_identifier
+    try:
+        validate_identifier(name)
+    except IdentifierError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    settings = Settings()
+    conn = MongoConnection.open(settings.uri, settings.database)
+    try:
+        db = conn.db
+        cfg = load_config(db, name)
+        if not cfg:
+            raise HTTPException(status_code=400, detail=f"{name} is not configured")
+        dropped: list[str] = []
+        if req.drop_data:
+            if cfg.mode == "inline":
+                db[name].update_many({}, {"$unset": {"_msem": ""}})
+                dropped.append(f"inline _msem on {name}")
+            elif cfg.shadow_collection:
+                db.drop_collection(cfg.shadow_collection)
+                dropped.append(cfg.shadow_collection)
+        delete_config(db, name)
+        return {"ok": True, "collection": name, "dropped": dropped}
+    finally:
+        conn.close()
 
 
 @router.post("/api/reindex")

@@ -87,3 +87,44 @@ def test_reindex_enqueues_jobs_for_all_docs(monkeypatch):
                         headers={CSRF_HEADER: token})
         assert r.status_code == 200
         assert r.json()["enqueued"] == 3
+
+
+def test_teardown_removes_config_and_drops_shadow(monkeypatch):
+    client, db = _client_db(monkeypatch)
+    _seed(db)
+    db["articles_embeddings"].insert_one({"source_id": "x", "field_path": "body"})
+    seed = client.get("/healthz")
+    token = seed.cookies.get("csrftoken")
+    with patch("mongosemantic.web.routes.dashboard.MongoConnection.open", return_value=_conn(db)):
+        r = client.post("/api/collections/articles/teardown",
+                        json={"drop_data": True}, headers={CSRF_HEADER: token})
+        assert r.status_code == 200, r.text
+    from mongosemantic.state import load_config
+    assert load_config(db, "articles") is None
+    assert "articles_embeddings" not in db.list_collection_names()
+
+
+def test_teardown_keep_data_leaves_shadow_intact(monkeypatch):
+    client, db = _client_db(monkeypatch)
+    _seed(db)
+    db["articles_embeddings"].insert_one({"source_id": "x", "field_path": "body"})
+    seed = client.get("/healthz")
+    token = seed.cookies.get("csrftoken")
+    with patch("mongosemantic.web.routes.dashboard.MongoConnection.open", return_value=_conn(db)):
+        r = client.post("/api/collections/articles/teardown",
+                        json={"drop_data": False}, headers={CSRF_HEADER: token})
+        assert r.status_code == 200
+    from mongosemantic.state import load_config
+    assert load_config(db, "articles") is None
+    # Shadow data preserved for a later rebuild.
+    assert db["articles_embeddings"].count_documents({}) == 1
+
+
+def test_teardown_rejects_unconfigured(monkeypatch):
+    client, db = _client_db(monkeypatch)
+    seed = client.get("/healthz")
+    token = seed.cookies.get("csrftoken")
+    with patch("mongosemantic.web.routes.dashboard.MongoConnection.open", return_value=_conn(db)):
+        r = client.post("/api/collections/missing/teardown",
+                        json={"drop_data": True}, headers={CSRF_HEADER: token})
+        assert r.status_code == 400

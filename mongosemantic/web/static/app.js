@@ -296,24 +296,51 @@
           const model = c.embedding_model
             ? `<code style="font-size:12px">${escapeHtml(c.embedding_model)}</code> <small>(${escapeHtml(c.mode || "")})</small>`
             : `<small>—</small>`;
+          const n = encodeURIComponent(c.name);
           const actions = isConf
-            ? `<a href="#/inspect/${encodeURIComponent(c.name)}">Inspect</a>
+            ? `<a href="#/inspect/${n}">Inspect</a>
                &nbsp;·&nbsp;
-               <a href="#" data-migrate="${escapeHtml(c.name)}" data-mode="${escapeHtml(c.mode || "")}">Migrate model</a>`
-            : `<a href="#/inspect/${encodeURIComponent(c.name)}">${escapeHtml(CONTENT.collections.row_action)}</a>`;
+               <a href="#/apply/${n}">Reconfigure</a>
+               &nbsp;·&nbsp;
+               <a href="#" data-reindex="${escapeHtml(c.name)}">Reindex</a>
+               &nbsp;·&nbsp;
+               <a href="#" data-migrate="${escapeHtml(c.name)}" data-mode="${escapeHtml(c.mode || "")}">Migrate</a>
+               &nbsp;·&nbsp;
+               <a href="#" data-teardown="${escapeHtml(c.name)}" style="color:var(--mdb-bad)">Remove</a>`
+            : `<a href="#/inspect/${n}">${escapeHtml(CONTENT.collections.row_action)}</a>`;
           return `<tr>
             <td><strong>${escapeHtml(c.name)}</strong></td>
             <td>${pill}</td>
             <td>${model}</td>
-            <td style="text-align:right">${actions}</td>
+            <td style="text-align:right;white-space:nowrap">${actions}</td>
           </tr>`;
         }).join("");
         tbl.innerHTML = head + "<tbody>" + rows + "</tbody>";
-        // Wire the per-row migrate action.
+        // Wire the per-row actions.
         $$("a[data-migrate]", tbl).forEach(a => {
-          a.onclick = (ev) => {
+          a.onclick = (ev) => { ev.preventDefault(); openMigrateModal(a.dataset.migrate, a.dataset.mode); };
+        });
+        $$("a[data-reindex]", tbl).forEach(a => {
+          a.onclick = async (ev) => {
             ev.preventDefault();
-            openMigrateModal(a.dataset.migrate, a.dataset.mode);
+            const name = a.dataset.reindex;
+            if (!confirm(`Reindex ${name}? This drops existing embeddings and re-enqueues every doc.`)) return;
+            try {
+              const r = await fetchJson("POST", "/api/reindex", { collection: name });
+              toast(`Enqueued ${r.enqueued} reindex job(s).`);
+            } catch (e) { toast(e.message); }
+          };
+        });
+        $$("a[data-teardown]", tbl).forEach(a => {
+          a.onclick = async (ev) => {
+            ev.preventDefault();
+            const name = a.dataset.teardown;
+            if (!confirm(`Remove semantic-search config from ${name}?\n\nThis drops the shadow collection (or clears inline _msem) and deletes the config. Cannot be undone — but you can apply again.`)) return;
+            try {
+              await fetchJson("POST", `/api/collections/${encodeURIComponent(name)}/teardown`, { drop_data: true });
+              toast(`Removed config for ${name}.`);
+              handlers.collections();
+            } catch (e) { toast(e.message); }
           };
         });
       } catch (e) { toast(e.message); }
@@ -323,6 +350,8 @@
       if (!name) return;
       $("#inspect-title").textContent = CONTENT.inspect.title.replace("{collection}", name);
       $("#inspect-apply-link").href = `#/apply/${encodeURIComponent(name)}`;
+      const sample = $("#inspect-sample");
+      sample.textContent = "loading…";
       try {
         const data = await fetchJson("GET", `/api/collections/${encodeURIComponent(name)}/inspect`);
         $("#inspect-subtitle").textContent =
@@ -343,39 +372,66 @@
         </tr>`).join("");
         $("#inspect-table").innerHTML = head + "<tbody>" + rows + "</tbody>";
       } catch (e) { toast(e.message); }
+      try {
+        const s = await fetchJson("GET", `/api/collections/${encodeURIComponent(name)}/sample?limit=3`);
+        sample.textContent = JSON.stringify(s.documents, null, 2);
+      } catch (e) {
+        sample.textContent = "(could not load sample: " + e.message + ")";
+      }
     },
 
     apply: async ([name]) => {
       if (!name) { toast("Pick a collection from Collections first."); return; }
       const f = $("#form-apply");
       const c = CONTENT.apply;
+      // Try to load existing config — present? then this is a Reconfigure.
+      let existing = null;
+      try {
+        const cfg = await fetchJson("GET", `/api/collections/${encodeURIComponent(name)}/config`);
+        if (cfg.configured) existing = cfg;
+      } catch { /* no config yet; new apply */ }
+      const isReconfigure = !!existing;
+      // Title morphs to reflect intent.
+      const titleEl = document.querySelector("#page-apply h2");
+      if (titleEl) titleEl.textContent = isReconfigure
+        ? `Reconfigure ${name}` : `Configure ${name}`;
+      const submitLabel = isReconfigure ? "Save changes" : escapeHtml(c.cta_apply);
+      const initialFields  = isReconfigure ? existing.fields.join(", ") : "";
+      const initialMode    = isReconfigure ? existing.mode : "shadow";
+      const initialChunked = isReconfigure ? existing.chunked : false;
+      const initialModel   = isReconfigure ? existing.model : "local-fast";
+      const modelOptions = [
+        ["local-fast",   c.model_local_fast],
+        ["local-better", c.model_local_better],
+        ["openai-small", c.model_openai_small],
+        ["openai-large", c.model_openai_large],
+        ["ollama-nomic", c.model_ollama_nomic],
+      ].map(([val, label]) =>
+        `<option value="${val}" ${val === initialModel ? "selected" : ""}>${escapeHtml(label)}</option>`
+      ).join("");
       f.innerHTML = `
         <fieldset>
           <legend>${escapeHtml(c.section_fields)}</legend>
-          <input id="apply-fields" placeholder="comma-separated paths, e.g. body, title">
+          <input id="apply-fields" placeholder="comma-separated paths, e.g. body, title" value="${escapeHtml(initialFields)}">
         </fieldset>
         <fieldset>
           <legend>${escapeHtml(c.section_mode)}</legend>
-          <label><input type="radio" name="mode" value="shadow" checked> ${escapeHtml(c.mode_shadow)}</label>
+          <label><input type="radio" name="mode" value="shadow" ${initialMode === "shadow" ? "checked" : ""}> ${escapeHtml(c.mode_shadow)}</label>
           <br>
-          <label><input type="radio" name="mode" value="inline"> ${escapeHtml(c.mode_inline)}</label>
+          <label><input type="radio" name="mode" value="inline" ${initialMode === "inline" ? "checked" : ""}> ${escapeHtml(c.mode_inline)}</label>
         </fieldset>
         <fieldset>
           <legend>${escapeHtml(c.section_chunking)}</legend>
-          <label><input id="apply-chunked" type="checkbox"> ${escapeHtml(c.chunking_toggle)}</label>
+          <label><input id="apply-chunked" type="checkbox" ${initialChunked ? "checked" : ""}> ${escapeHtml(c.chunking_toggle)}</label>
           <small>${escapeHtml(c.mode_chunk_notice)}</small>
         </fieldset>
         <fieldset>
           <legend>${escapeHtml(c.section_model)}</legend>
-          <select id="apply-model">
-            <option value="local-fast">${escapeHtml(c.model_local_fast)}</option>
-            <option value="local-better">${escapeHtml(c.model_local_better)}</option>
-            <option value="openai-small">${escapeHtml(c.model_openai_small)}</option>
-            <option value="openai-large">${escapeHtml(c.model_openai_large)}</option>
-            <option value="ollama-nomic">${escapeHtml(c.model_ollama_nomic)}</option>
-          </select>
+          <select id="apply-model">${modelOptions}</select>
+          <small style="display:block;margin-top:6px">Changing the model from the current value requires a migration, not just a reconfigure. Use the Migrate action on the Collections page instead.</small>
         </fieldset>
-        <button type="submit">${escapeHtml(c.cta_apply)}</button>
+        <button type="submit">${submitLabel}</button>
+        ${isReconfigure ? `<p style="margin-top:12px;font-size:13px;color:var(--mdb-ink-muted)">After saving, click <em>Reindex</em> on the Collections page to clear and re-embed with the new field set.</p>` : ""}
       `;
       f.onsubmit = async ev => {
         ev.preventDefault();
@@ -387,7 +443,10 @@
           await fetchJson("POST", `/api/collections/${encodeURIComponent(name)}/apply`,
             { fields, mode, chunked, model });
           toast(CONTENT.global.toast_config_updated);
-          location.hash = `#/indexing/${encodeURIComponent(name)}`;
+          // After a fresh apply send the user to indexing. After a
+          // reconfigure leave them on Collections so they can reindex
+          // when they're ready.
+          location.hash = isReconfigure ? "#/collections" : `#/indexing/${encodeURIComponent(name)}`;
         } catch (e) { toast(e.message); }
       };
     },

@@ -1,6 +1,7 @@
 from mongosemantic.state.config_store import (
     CollectionConfig,
     FieldSpec,
+    delete_config,
     disable_config,
     list_configured,
     load_config,
@@ -38,6 +39,7 @@ __all__ = [
     "load_config",
     "list_configured",
     "disable_config",
+    "delete_config",
     "ensure_indexes",
     "enqueue_embed",
     "enqueue_delete_all",

@@ -21,6 +21,7 @@ from mongosemantic.commands import retry as _retry_mod  # noqa: E402
 from mongosemantic.commands import search as _search_mod  # noqa: E402
 from mongosemantic.commands import serve as _serve_mod  # noqa: E402
 from mongosemantic.commands import status as _status_mod  # noqa: E402
+from mongosemantic.commands import teardown as _teardown_mod  # noqa: E402
 from mongosemantic.commands import ui as _ui_mod  # noqa: E402
 
 app.command("inspect")(_inspect_mod.inspect_cmd)
@@ -34,6 +35,7 @@ app.command("ui")(_ui_mod.ui_cmd)
 app.command("serve")(_serve_mod.serve_cmd)
 app.command("integrate")(_integrate_mod.integrate_cmd)
 app.command("migrate")(_migrate_mod.migrate_cmd)
+app.command("teardown")(_teardown_mod.teardown_cmd)
 
 
 @app.command("worker")

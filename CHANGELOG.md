@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.7.0 — 2026-05-19
+
+UI completeness — every CLI feature now has a UI surface.
+
+- **New `teardown` command** (CLI + `POST /api/collections/{name}/teardown`)
+  removes semantic-search config + drops the shadow collection (or clears
+  inline `_msem`). `--keep-data` flag preserves embeddings for a later
+  rebuild without re-embedding.
+- **Per-row actions on the Collections page**: Inspect · Reconfigure ·
+  Reindex · Migrate · Remove. Reindex and Remove fire confirm dialogs;
+  Remove is styled in red. Was previously only Inspect + Migrate.
+- **Apply page detects existing config** and prefills the form when
+  used as Reconfigure (title morphs to "Reconfigure {name}", button
+  becomes "Save changes", a hint reminds the user to Reindex after a
+  field-set change).
+- **Inspect page** now shows 3 randomly-sampled documents (embedding
+  sub-doc stripped) below the suitability table so you can see the
+  shape of the data before configuring.
+- **New endpoints**: `GET /api/collections/{name}/config` (used by
+  prefill) and `GET /api/collections/{name}/sample` (used by Inspect).
+
 ## 0.6.3 — 2026-05-19
 
 - UI layout: navigation moved from the top bar into a 240-px left
