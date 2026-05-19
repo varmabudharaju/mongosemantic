@@ -13,3 +13,7 @@ htmlcov/
 .ruff_cache/
 .DS_Store
 *.swp
+
+# session-scratch handoff files for resuming work in a new chat window
+_session-handoff.md
+.claude/
