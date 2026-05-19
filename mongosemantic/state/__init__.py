@@ -17,6 +17,7 @@ from mongosemantic.state.heartbeat import (
 from mongosemantic.state.job_queue import (
     claim_batch,
     complete,
+    count_by_collection,
     count_by_status,
     enqueue_delete_all,
     enqueue_embed,
@@ -49,6 +50,7 @@ __all__ = [
     "reset_failed",
     "recent_failed_jobs",
     "count_by_status",
+    "count_by_collection",
     "save_resume_token",
     "load_resume_token",
     "save_polling_watermark",

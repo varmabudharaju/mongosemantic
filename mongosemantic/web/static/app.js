@@ -558,6 +558,7 @@
     },
 
     dashboard: async () => {
+      const renderOnce = async () => {
       try {
         const d = await fetchJson("GET", "/api/dashboard");
         const card = (label, value, sub, accent) => `
@@ -575,6 +576,46 @@
                (d.jobs.failed || 0) > 0 ? "retry from below" : "no failures"),
           card("Topology", d.topology.replace("_", " "), `${d.configured.length} configured`),
         ].join("");
+
+        // Per-collection indexing breakdown
+        const perTbl = $("#dashboard-perCollection");
+        const byColl = d.jobs_by_collection || {};
+        const collNames = Object.keys(byColl).sort();
+        if (collNames.length === 0) {
+          perTbl.innerHTML = `<tbody><tr><td><small>No jobs in the queue. Once you index a collection, activity shows here.</small></td></tr></tbody>`;
+        } else {
+          perTbl.innerHTML = `<thead><tr>
+            <th>Collection</th>
+            <th style="text-align:right">Pending</th>
+            <th style="text-align:right">In flight</th>
+            <th style="text-align:right">Completed</th>
+            <th style="text-align:right">Failed</th>
+            <th style="text-align:right">Progress</th>
+          </tr></thead><tbody>` + collNames.map(name => {
+            const c = byColl[name];
+            const pending = c.pending || 0;
+            const inflight = c.in_flight || 0;
+            const completed = c.completed || 0;
+            const failed = c.failed || 0;
+            const total = pending + inflight + completed + failed;
+            const pct = total ? Math.round((completed / total) * 100) : 0;
+            return `<tr>
+              <td><strong>${escapeHtml(name)}</strong></td>
+              <td style="text-align:right">${pending}</td>
+              <td style="text-align:right">${inflight ? `<span style="color:var(--mdb-forest);font-weight:600">${inflight}</span>` : 0}</td>
+              <td style="text-align:right">${completed}</td>
+              <td style="text-align:right">${failed ? `<span style="color:var(--mdb-bad)">${failed}</span>` : 0}</td>
+              <td style="text-align:right;min-width:140px">
+                <div style="display:inline-flex;align-items:center;gap:8px">
+                  <div style="width:100px;height:6px;background:var(--mdb-line);border-radius:3px;overflow:hidden">
+                    <div style="width:${pct}%;height:100%;background:linear-gradient(90deg,var(--mdb-forest),var(--mdb-leaf));transition:width 200ms"></div>
+                  </div>
+                  <small style="min-width:30px">${pct}%</small>
+                </div>
+              </td>
+            </tr>`;
+          }).join("") + `</tbody>`;
+        }
 
         // Workers
         const wTbl = $("#dashboard-workers");
@@ -608,12 +649,20 @@
             </tr>`).join("")}</tbody>
           </table></div>`;
         }
-      } catch (e) { toast(e.message); }
+      } catch (e) { /* swallow — auto-poll keeps retrying */ }
+      };  // end renderOnce
+      await renderOnce();
+      // Auto-refresh while the user stays on this page.
+      if (window._dashboardTimer) clearInterval(window._dashboardTimer);
+      window._dashboardTimer = setInterval(() => {
+        if (location.hash.startsWith("#/dashboard")) renderOnce();
+        else { clearInterval(window._dashboardTimer); window._dashboardTimer = null; }
+      }, 3000);
       $("#dashboard-retry").onclick = async () => {
         try {
           const r = await fetchJson("POST", "/api/jobs/retry");
           toast(`reset ${r.reset} failed job(s)`);
-          handlers.dashboard();
+          renderOnce();
         } catch (e) { toast(e.message); }
       };
     },
@@ -710,6 +759,35 @@
       const el = $("#sidebar-version");
       if (el && v && v.version) el.textContent = "v" + v.version;
     } catch { /* sidebar footer just stays as the placeholder */ }
+
+    // Global queue indicator — visible from any page, every 5s.
+    const pollQueue = async () => {
+      try {
+        const s = await fetchJson("GET", "/api/jobs/status");
+        const pending = (s.jobs && s.jobs.pending) || 0;
+        const inflight = (s.jobs && s.jobs.in_flight) || 0;
+        const failed = (s.jobs && s.jobs.failed) || 0;
+        const link = $("#sidebar-queue");
+        const text = $("#sidebar-queue-text");
+        const dot = $("#sidebar-queue-dot");
+        if (!link) return;
+        if (pending || inflight || failed) {
+          link.style.display = "block";
+          const parts = [];
+          if (inflight) parts.push(`${inflight} running`);
+          if (pending) parts.push(`${pending} pending`);
+          if (failed) parts.push(`${failed} failed`);
+          text.textContent = parts.join(" · ");
+          dot.style.background = failed
+            ? "var(--mdb-bad)"
+            : inflight ? "var(--mdb-leaf)" : "var(--mdb-warn)";
+        } else {
+          link.style.display = "none";
+        }
+      } catch { /* don't break the UI over a poll error */ }
+    };
+    pollQueue();
+    setInterval(pollQueue, 5000);
     window.addEventListener("hashchange", route);
     route();
 

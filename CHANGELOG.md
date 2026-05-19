@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.1 — 2026-05-19
+
+- **Live indexing visibility.** Dashboard gets a new "Indexing activity"
+  table that breaks job counts down per collection — pending, in_flight,
+  completed, failed, and a per-collection % complete progress bar.
+- Dashboard auto-refreshes every 3 seconds while it's the active page;
+  the interval clears the moment you navigate away.
+- **Global queue indicator in the sidebar footer** — visible from any
+  page. Shows `N running · M pending · K failed` and tints green when
+  the worker is active, amber when there's a backlog with no worker,
+  red when there are failures. Clicking it jumps to the Dashboard.
+- Backend: new `count_by_collection()` helper and the dashboard endpoint
+  now returns `jobs_by_collection` alongside the existing global counts.
+- Search bar: input + Search button merged into a single rounded
+  container with a leading magnifier icon and a unified focus ring.
+
 ## 0.7.0 — 2026-05-19
 
 UI completeness — every CLI feature now has a UI surface.

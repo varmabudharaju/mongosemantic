@@ -63,7 +63,11 @@
       </a>
     </nav>
     <div class="sidebar-foot" id="sidebar-foot">
-      <small id="sidebar-version">…</small>
+      <a id="sidebar-queue" href="#/dashboard" style="display:none;color:rgba(255,255,255,0.7);text-decoration:none;font-size:11px;letter-spacing:0.04em">
+        <span id="sidebar-queue-dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--mdb-leaf);margin-right:6px;vertical-align:middle"></span>
+        <span id="sidebar-queue-text"></span>
+      </a>
+      <small id="sidebar-version" style="display:block;margin-top:8px">…</small>
     </div>
   </aside>
 
@@ -236,6 +240,8 @@
       </aside>
       <div id="dashboard-cards"></div>
       <div style="margin-top:12px"><button id="dashboard-retry" class="ghost">Retry failed jobs</button></div>
+      <h3 style="margin-top:24px">Indexing activity <span id="dashboard-tick" style="font-size:11px;color:var(--mdb-ink-muted);font-weight:400;letter-spacing:0">auto-refreshing every 3s</span></h3>
+      <div class="table-wrap"><table id="dashboard-perCollection"></table></div>
       <h3 style="margin-top:24px">Workers</h3>
       <div class="table-wrap"><table id="dashboard-workers"></table></div>
       <h3 style="margin-top:24px">Recent failures</h3>

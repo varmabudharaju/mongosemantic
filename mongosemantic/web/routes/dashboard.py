@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from mongosemantic.config import Settings
 from mongosemantic.db.client import MongoConnection
 from mongosemantic.state import (
+    count_by_collection,
     count_by_status,
     delete_config,
     ensure_indexes,
@@ -50,6 +51,7 @@ def dashboard() -> dict:
             ],
             "total_embeddings": total_embeddings,
             "jobs": count_by_status(db),
+            "jobs_by_collection": count_by_collection(db),
             "workers": [
                 {
                     "worker_id": hb.worker_id,

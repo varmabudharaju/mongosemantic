@@ -149,6 +149,24 @@ def count_by_status(db: Database) -> dict[str, int]:
     return out
 
 
+def count_by_collection(db: Database) -> dict[str, dict[str, int]]:
+    """Per-collection breakdown of job status counts. Used by the dashboard's
+    "indexing activity" view so operators can see which collection is actively
+    being processed and which has piled-up failures."""
+    out: dict[str, dict[str, int]] = {}
+    for row in db[JOBS_COLLECTION].aggregate([
+        {"$group": {
+            "_id": {"collection": "$collection", "status": "$status"},
+            "n": {"$sum": 1},
+        }}
+    ]):
+        coll = row["_id"]["collection"] or "<unknown>"
+        status = row["_id"]["status"]
+        out.setdefault(coll, {}).setdefault(status, 0)
+        out[coll][status] = row["n"]
+    return out
+
+
 def recent_failed_jobs(db: Database, limit: int = 10) -> list[dict]:
     """Most recently failed jobs, with the last_error message — for surfacing
     in `status` and the dashboard so failures are actionable, not just a count."""
