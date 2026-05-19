@@ -47,13 +47,21 @@ def search(
     notice: str | None = None
     try:
         db = conn.db
-        provider = get_provider(settings.model)
-        qvec = provider.embed(q).tolist()
+
+        # Embed the query with the collection's *own* model — not the
+        # global default. Otherwise after a migration the dims mismatch
+        # and the search returns noise.
+        qvec_cache: dict[str, list[float]] = {}
+        def _qvec(model: str) -> list[float]:
+            if model not in qvec_cache:
+                qvec_cache[model] = get_provider(model).embed(q).tolist()
+            return qvec_cache[model]
 
         def _run(cfg, name):
+            qv = _qvec(cfg.embedding_model)
             if hybrid and hybrid_available(cfg, conn.topology):
-                return run_one_hybrid(db, cfg, name, q, qvec, limit, conn.topology)
-            return _run_one(db, cfg, name, qvec, limit, conn.topology)
+                return run_one_hybrid(db, cfg, name, q, qv, limit, conn.topology)
+            return _run_one(db, cfg, name, qv, limit, conn.topology)
 
         if collection:
             cfg = load_config(db, collection)

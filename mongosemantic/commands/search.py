@@ -127,13 +127,21 @@ def search_cmd(
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
         db = conn.db
-        provider = get_provider(settings.model)
-        qvec = provider.embed(query).tolist()
+
+        # The query has to be embedded with the *same* model the collection
+        # was indexed with — embedding-model and embedding-dim must match
+        # the stored vectors or the search returns garbage.
+        qvec_cache: dict[str, list[float]] = {}
+        def _qvec(model: str) -> list[float]:
+            if model not in qvec_cache:
+                qvec_cache[model] = get_provider(model).embed(query).tolist()
+            return qvec_cache[model]
 
         def _run(cfg, name):
+            qv = _qvec(cfg.embedding_model)
             if hybrid and hybrid_available(cfg, conn.topology):
-                return run_one_hybrid(db, cfg, name, query, qvec, limit, conn.topology)
-            return _run_one(db, cfg, name, qvec, limit, conn.topology)
+                return run_one_hybrid(db, cfg, name, query, qv, limit, conn.topology)
+            return _run_one(db, cfg, name, qv, limit, conn.topology)
 
         if collection:
             cfg = load_config(db, collection)

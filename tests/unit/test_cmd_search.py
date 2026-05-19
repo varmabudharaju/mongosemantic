@@ -109,6 +109,44 @@ def test_resolved_vector_index_name_prefers_stored_over_computed():
     assert _resolved_vector_index_name(cfg, "body") == vector_index_name(cfg.collection, "body")
 
 
+def test_search_embeds_with_collection_model_not_global_setting(monkeypatch):
+    """Regression: after a migration the collection's stored model may differ
+    from MONGOSEMANTIC_MODEL. The query must be embedded with the *collection's*
+    model so dimensions match the stored vectors."""
+    db = mongomock.MongoClient()["d"]
+    save_config(db, CollectionConfig(
+        collection="articles", mode="shadow", shadow_collection="articles_embeddings",
+        fields=[FieldSpec(path="body")],
+        embedding_model="local-better", embedding_dim=768,
+        created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc),
+    ))
+
+    monkeypatch.setenv("MONGOSEMANTIC_URI", "mongodb://fake")
+    monkeypatch.setenv("MONGOSEMANTIC_DB", "d")
+    monkeypatch.setenv("MONGOSEMANTIC_MODEL", "local-fast")  # deliberately wrong
+
+    captured_models: list[str] = []
+    def fake_get_provider(model: str):
+        captured_models.append(model)
+        p = MagicMock()
+        p.embed = lambda q: np.array([0.0] * 768, dtype=np.float32)
+        return p
+
+    fake_conn = MagicMock()
+    fake_conn.db = db
+    fake_conn.topology = Topology.STANDALONE
+    fake_conn.close = MagicMock()
+
+    with patch("mongosemantic.commands.search.MongoConnection.open", return_value=fake_conn), \
+         patch("mongosemantic.commands.search.get_provider", side_effect=fake_get_provider), \
+         patch("mongosemantic.commands.search._run_one", return_value=[]):
+        r = runner.invoke(app, ["search", "anything", "--collection", "articles"])
+        assert r.exit_code == 0, r.output
+    # local-better is what's stored in cfg; local-fast is the global default.
+    # The provider call must use the collection's model.
+    assert captured_models == ["local-better"]
+
+
 def test_run_one_merges_and_top_k_across_fields():
     """When fields each return rows, results merge, sort by score desc, then top-limit."""
     db = mongomock.MongoClient()["d"]
