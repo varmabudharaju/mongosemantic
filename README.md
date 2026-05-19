@@ -41,6 +41,22 @@ The dashboard provides:
 - Read-only aggregation runner (10s timeout, 100-doc limit)
 - Job queue dashboard with retry / reindex
 
+## Hybrid search (Atlas)
+
+Combine semantic similarity with BM25 keyword matching, fused via Atlas
+`$rankFusion`. Useful when a query mixes meaning and specific terms — e.g.
+*"MongoDB 7.0 replica set issues"* benefits from semantic (catches
+"replica set" → "replication") plus keyword (anchors on "7.0").
+
+```bash
+mongosemantic search "MongoDB 7.0 replica set issues" --hybrid
+```
+
+CLI flag, web UI toggle, and `hybrid_search` MCP tool are all wired. Atlas
+auto-creates both the vector index and the BM25 search index during
+`apply`. Self-hosted topologies and inline-mode collections fall back to
+pure semantic with a clear notice (no error).
+
 ## MCP — let Claude Desktop / Cursor query your MongoDB
 
 ```bash
@@ -48,12 +64,13 @@ mongosemantic integrate claude          # writes Claude Desktop config (restart 
 mongosemantic serve --transport sse     # or run as a standalone SSE server on :8090
 ```
 
-Nine tools are exposed:
+Ten tools are exposed:
 
 | Tool | What it does |
 |---|---|
 | `semantic_search` | Find rows in one collection by meaning |
-| `search_all_collections` | Same, fanned out across every configured collection |
+| `hybrid_search` | Semantic + BM25 fused via Atlas `$rankFusion`; falls back to semantic with a notice elsewhere |
+| `search_all_collections` | Cross-collection fanout, merged by score |
 | `list_collections` | Every collection + its configured/not-configured status |
 | `list_configured` | Just the ones with semantic search wired up |
 | `inspect_collection` | Field-by-field suitability scoring |
@@ -62,7 +79,7 @@ Nine tools are exposed:
 | `safe_aggregation` | Read-only pipeline runner (10s, 100-row, no `$out`/`$merge`/`$function`) |
 | `get_schema_context` | Compact schema summary for AI-generated aggregations |
 
-## Status (v0.3.0)
+## Status (v0.4.0)
 
 - [x] Connect to Atlas / replica set / standalone
 - [x] Inspect a collection, score fields for suitability
@@ -74,7 +91,7 @@ Nine tools are exposed:
 - [x] CLI: inspect / apply / index / search / worker / status / retry / reindex / **ui** / **serve** / **integrate**
 - [x] Web UI with seven pages and a safe aggregation runner
 - [x] **MCP server** for Claude Desktop / Cursor / any MCP client (stdio + SSE)
-- [ ] Atlas hybrid search (semantic + keyword) _(v0.4.0)_
+- [x] **Atlas hybrid search** — semantic + keyword via `$rankFusion` (`--hybrid` / UI toggle / `hybrid_search` MCP tool)
 - [ ] Zero-downtime model migration _(v0.5.0)_
 
 ## Embedding models

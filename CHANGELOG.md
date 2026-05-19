@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.0 — 2026-05-18
+
+- Hybrid search: combines `$vectorSearch` (semantic) and `$search` (BM25) via
+  Atlas `$rankFusion`. Wired in three places: `mongosemantic search ... --hybrid`,
+  a "Hybrid" toggle on the web Search page, and a new `hybrid_search` MCP tool
+  (now 10 tools total).
+- `apply` on Atlas + shadow mode now auto-creates both the vector index and
+  the BM25 Atlas Search index (`mongosemantic_search_{coll}_{digest}`).
+- Self-hosted topologies and inline-mode collections fall back to pure semantic
+  with a clear `notice` (no error). The web UI surfaces this in an amber banner.
+- New helpers: `mongosemantic.search.hybrid` (`build_hybrid_pipeline`,
+  `search_index_name`) and `mongosemantic.db.indexes` (`create_atlas_search_index`,
+  `search_index_definition`, `atlas_search_index_exists`).
+
 ## 0.3.0 — 2026-05-18
 
 - New `mongosemantic serve` command — boots an MCP server over stdio (default,
