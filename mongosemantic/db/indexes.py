@@ -95,3 +95,40 @@ def suggested_atlas_command(
         f'{{"name": "{name}", "type": "vectorSearch", '
         f'"definition": {definition}}})'
     )
+
+
+# --- Atlas Search (BM25 / keyword) index — used by hybrid search ----------
+
+def search_index_definition(path: str = "chunk_text") -> dict[str, Any]:
+    """Atlas Search index definition for a single text field."""
+    return {
+        "mappings": {
+            "dynamic": False,
+            "fields": {
+                path: {"type": "string", "analyzer": "lucene.standard"},
+                "field_path": {"type": "string", "analyzer": "lucene.keyword"},
+            },
+        }
+    }
+
+
+def create_atlas_search_index(
+    target: Collection,
+    name: str,
+    path: str = "chunk_text",
+) -> str:
+    """Create an Atlas Search (BM25) index on `target`. Returns the index name.
+
+    Safe to call repeatedly — an already-existing index is left in place.
+    """
+    existing = {idx.get("name") for idx in list(target.list_search_indexes())}
+    if name in existing:
+        return name
+    target.create_search_index(
+        {"name": name, "type": "search", "definition": search_index_definition(path)}
+    )
+    return name
+
+
+def atlas_search_index_exists(target: Collection, name: str) -> bool:
+    return any(idx.get("name") == name for idx in target.list_search_indexes())

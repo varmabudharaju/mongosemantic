@@ -9,12 +9,14 @@ from rich.console import Console
 from mongosemantic.config import MODEL_DIMS, Settings
 from mongosemantic.db.client import MongoConnection, Topology
 from mongosemantic.db.indexes import (
+    create_atlas_search_index,
     create_atlas_vector_index,
     ensure_shadow_indexes,
     shadow_collection_name,
     suggested_atlas_command,
 )
 from mongosemantic.db.queries import inline_embedding_path
+from mongosemantic.search.hybrid import search_index_name
 from mongosemantic.state import (
     CollectionConfig,
     FieldSpec,
@@ -94,12 +96,19 @@ def apply_cmd(
                         name = create_atlas_vector_index(
                             db[shadow_name], collection, p, dim, path="embedding"
                         )
+                        # Hybrid search needs a sibling text index on chunk_text.
+                        search_name = create_atlas_search_index(
+                            db[shadow_name], search_index_name(collection, p)
+                        )
+                        console.print(
+                            f"[green]Atlas indexes created: vector={name}, search={search_name}[/green]"
+                        )
                     else:
                         name = create_atlas_vector_index(
                             db[collection], collection, p, dim,
                             path=inline_embedding_path(p),
                         )
-                    console.print(f"[green]Atlas vector index created: {name}[/green]")
+                        console.print(f"[green]Atlas vector index created: {name}[/green]")
             except Exception as e:
                 console.print(f"[yellow]Could not auto-create Atlas vector index: {e}[/yellow]")
                 for p in fields:
