@@ -77,12 +77,18 @@ def build_hybrid_pipeline(
             "$rankFusion": {
                 "input": {"pipelines": {"vector": vector_sub, "text": text_sub}},
                 "combination": {"weights": {"vector": vector_weight, "text": text_weight}},
-                "scoreDetails": True,
+                # scoreDetails is computed server-side but we don't project it
+                # (would shadow the numeric score and break downstream sort).
+                # Set to False to avoid the cost. Flip to True + add a debug
+                # projection if you ever need to inspect sub-pipeline weights.
+                "scoreDetails": False,
             }
         },
         {"$match": {"field_path": field_path}},
         {"$limit": limit},
         lookup_source_stage(source_collection),
         unwind_source_stage(),
-        base_projection({"$meta": "scoreDetails"}),
+        # Numeric fused score (sortable downstream). scoreDetails is a dict
+        # and would break commands/search.py's sort-by-score.
+        base_projection({"$meta": "score"}),
     ]

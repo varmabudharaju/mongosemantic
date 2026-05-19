@@ -28,6 +28,130 @@ def test_apply_creates_shadow_indexes_and_saves_config(monkeypatch):
     assert cfg.fields[0].path == "body"
     assert cfg.shadow_collection == "articles_embeddings"
 
+def test_apply_atlas_partial_index_failure_exits_non_zero_and_explains(monkeypatch):
+    """Regression: when an Atlas index creation fails partway (e.g. multi-field
+    apply hits the M0 cap of 3 search indexes after creating 2 of them),
+    `mongosemantic apply` must:
+
+      - Return a non-zero exit code (currently exits 0 — silent partial success).
+      - Print which fields succeeded and which failed.
+      - Surface the M0-cap message specifically when that's the underlying cause.
+
+    Surfaced by the Atlas verification suite (tier 3): on M0, apply with two
+    fields needs 4 indexes but only 3 can fit; the second field's vector index
+    fails, the loop bails, and the user sees a yellow warning + exit 0.
+    """
+    _patch_env(monkeypatch)
+    fake_db = mongomock.MongoClient()["d"]
+    fake_conn = MagicMock()
+    fake_conn.db = fake_db
+    from mongosemantic.db.client import Topology
+    fake_conn.topology = Topology.ATLAS
+
+    call_log: list[str] = []
+
+    def fake_vector(target, collection, field_path, dim, path="embedding"):
+        call_log.append(f"vector:{field_path}")
+        if field_path == "plot":
+            raise RuntimeError(
+                "The maximum number of FTS indexes has been reached for this instance size."
+            )
+        return f"mongosemantic_{collection}_{field_path}_v"
+
+    def fake_search(target, name, path="chunk_text"):
+        call_log.append(f"search:{name}")
+        return name
+
+    with (
+        patch("mongosemantic.commands.apply.MongoConnection.open", return_value=fake_conn),
+        patch("mongosemantic.commands.apply.create_atlas_vector_index", side_effect=fake_vector),
+        patch("mongosemantic.commands.apply.create_atlas_search_index", side_effect=fake_search),
+    ):
+        r = runner.invoke(
+            app,
+            ["apply", "--collection", "embedded_movies",
+             "--field", "title", "--field", "plot",
+             "--mode", "shadow"],
+        )
+
+    # Non-zero exit code is the main behavioral fix.
+    assert r.exit_code != 0, (
+        f"expected non-zero exit on partial Atlas index failure; got 0\noutput:\n{r.output}"
+    )
+    # Must name the failing field so the user can act.
+    assert "plot" in r.output, f"output must name the failing field; got:\n{r.output}"
+    # Must surface the M0-cap hint when the error mentions FTS cap.
+    out = r.output.lower()
+    assert "m0" in out or "free tier" in out or "fts" in out, (
+        f"output should hint at the M0 / FTS-cap cause; got:\n{r.output}"
+    )
+    # First field's indexes must have been attempted (partial state is OK; we
+    # don't roll back working indexes).
+    assert "vector:title" in call_log
+    assert "vector:plot" in call_log  # attempted (and failed)
+
+
+def test_apply_atlas_all_fields_fail_summary_says_none_succeeded(monkeypatch):
+    """When every field fails, the summary must say 'succeeded: none' rather
+    than printing an empty list. Belt-and-suspenders for an ugly format that
+    could otherwise read 'succeeded: []' in the user's terminal."""
+    _patch_env(monkeypatch)
+    fake_db = mongomock.MongoClient()["d"]
+    fake_conn = MagicMock()
+    fake_conn.db = fake_db
+    from mongosemantic.db.client import Topology
+    fake_conn.topology = Topology.ATLAS
+
+    def fail_all(*args, **kwargs):
+        raise RuntimeError("synthetic Atlas failure for every field")
+
+    with (
+        patch("mongosemantic.commands.apply.MongoConnection.open", return_value=fake_conn),
+        patch("mongosemantic.commands.apply.create_atlas_vector_index", side_effect=fail_all),
+        patch("mongosemantic.commands.apply.create_atlas_search_index", side_effect=fail_all),
+    ):
+        r = runner.invoke(
+            app,
+            ["apply", "--collection", "embedded_movies",
+             "--field", "title", "--field", "plot",
+             "--mode", "shadow"],
+        )
+
+    assert r.exit_code != 0, r.output
+    assert "succeeded: none" in r.output.lower()
+
+
+def test_apply_atlas_inline_mode_partial_failure_also_exits_non_zero(monkeypatch):
+    """Inline mode uses a different code path inside the per-field loop —
+    confirm it surfaces failures the same way as shadow mode."""
+    _patch_env(monkeypatch)
+    fake_db = mongomock.MongoClient()["d"]
+    fake_conn = MagicMock()
+    fake_conn.db = fake_db
+    from mongosemantic.db.client import Topology
+    fake_conn.topology = Topology.ATLAS
+
+    def fake_vector(target, collection, field_path, dim, path="embedding"):
+        if field_path == "plot":
+            raise RuntimeError("synthetic Atlas failure on inline plot")
+        return f"mongosemantic_{collection}_{field_path}_v"
+
+    with (
+        patch("mongosemantic.commands.apply.MongoConnection.open", return_value=fake_conn),
+        patch("mongosemantic.commands.apply.create_atlas_vector_index", side_effect=fake_vector),
+    ):
+        r = runner.invoke(
+            app,
+            ["apply", "--collection", "embedded_movies",
+             "--field", "title", "--field", "plot",
+             "--mode", "inline"],
+        )
+
+    assert r.exit_code != 0, r.output
+    assert "plot" in r.output
+    assert "remain in place" in r.output  # partial-state hint fired
+
+
 def test_apply_rejects_chunk_with_inline(monkeypatch):
     """--chunked is incompatible with --mode inline; reject loudly, don't silently downgrade."""
     _patch_env(monkeypatch)
