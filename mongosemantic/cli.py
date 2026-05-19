@@ -44,7 +44,7 @@ def worker_cmd(
     batch_size: int = typer.Option(32, "--batch-size"),
     once: bool = typer.Option(
         False, "--once",
-        help="Drain the queue once and exit. Skips change streams + heartbeat. "
+        help="Process all pending jobs once and exit. Skips change streams + heartbeat. "
              "Useful for cron jobs and ad-hoc catch-up runs."
     ),
 ) -> None:

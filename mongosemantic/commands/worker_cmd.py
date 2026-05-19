@@ -17,11 +17,11 @@ from mongosemantic.worker.runner import WorkerRunner, process_batch
 console = Console()
 
 
-def _drain_once(db, provider, batch_size: int) -> int:
+def _process_all_pending(db, provider, batch_size: int) -> int:
     """Process every pending job and exit. Used by `worker --once`."""
     total = 0
     while True:
-        n = process_batch(db, provider, worker_id="drain", batch_size=batch_size)
+        n = process_batch(db, provider, worker_id="worker-once", batch_size=batch_size)
         if n == 0:
             break
         total += n
@@ -35,13 +35,14 @@ def run_worker(poll_interval: int, batch_size: int, once: bool = False) -> None:
     ensure_indexes(db)
     provider = get_provider(settings.model)
     if once:
-        # One-shot drain: skip change streams / polling / heartbeat. Useful
-        # for cron, scripted demos, or quick ad-hoc catch-up runs.
+        # One-shot run: process all pending jobs, then exit. Skips change
+        # streams / polling / heartbeat. Useful for cron, scripted demos,
+        # or quick ad-hoc catch-up runs.
         if conn.topology == Topology.STANDALONE:
             for cfg in list_configured(db):
                 poll_once(db, cfg.collection)
-        n = _drain_once(db, provider, batch_size)
-        console.print(f"[green]Drained {n} job(s) and exiting.[/green]")
+        n = _process_all_pending(db, provider, batch_size)
+        console.print(f"[green]Processed {n} job(s) and exiting.[/green]")
         conn.close()
         return
     runner = WorkerRunner(db, provider, batch_size=batch_size)

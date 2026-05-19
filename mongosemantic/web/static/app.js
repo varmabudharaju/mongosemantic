@@ -113,7 +113,7 @@
     </ul>
 
     <h4>Index (embed existing docs)</h4>
-    <p>After Apply, your existing documents need embeddings. Click <em>Index</em> on the indexing page to enqueue jobs. A background worker drains them.</p>
+    <p>After Apply, your existing documents need embeddings. Click <em>Index</em> on the indexing page to enqueue jobs. A background worker processes them — you can watch the queue empty in real time on the Dashboard.</p>
 
     <h3>3. Search</h3>
     <p>Type a query, hit <strong>Search</strong> or press Enter. Leave the collection dropdown on <em>All configured collections</em> to fan out across every configured collection, or pick one to scope the search.</p>
