@@ -121,8 +121,9 @@ Eleven tools are exposed:
 - **Atlas paths are logically reviewed but not live-tested.** Vector index
   creation, `$vectorSearch`, `$search`, `$rankFusion`, and the migration
   index-name carry-over all work end-to-end against the self-hosted
-  replica set used by the integration tests. Reports against a real
-  Atlas cluster are welcome.
+  replica set used by the integration tests. See
+  [`docs/atlas-setup.md`](docs/atlas-setup.md) for a free-tier (M0)
+  runbook that exercises every Atlas-specific path in ~10 minutes.
 - The visualize page projects sampled embeddings to 2D via PCA only. K-means
   clustering with keyword labels (pgsemantic-style) is not in this release.
 
