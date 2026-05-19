@@ -13,7 +13,8 @@ from pymongo.database import Database
 
 from mongosemantic.commands.search import _run_one
 from mongosemantic.db.client import Topology
-from mongosemantic.db.schema import inspect_collection as _inspect, score_field
+from mongosemantic.db.schema import inspect_collection as _inspect
+from mongosemantic.db.schema import score_field
 from mongosemantic.embeddings.provider import get_provider
 from mongosemantic.search.cross_collection import (
     min_max_normalize,

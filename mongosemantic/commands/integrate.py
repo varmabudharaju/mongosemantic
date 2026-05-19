@@ -77,9 +77,9 @@ def integrate_cmd(
     if cfg_path.exists():
         try:
             existing = json.loads(cfg_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
             console.print(f"[yellow]Existing config at {cfg_path} is not valid JSON. Refusing to overwrite.[/yellow]")
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from e
     else:
         existing = {}
 
