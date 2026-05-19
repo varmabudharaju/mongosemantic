@@ -643,13 +643,14 @@
     try {
       CONTENT = await fetchJson("GET", "/api/content");
       hydrateContent();
-      $$("#app-nav a").forEach(a => {
-        const k = "nav_" + a.dataset.page;
-        if (CONTENT.global && CONTENT.global[k]) a.textContent = CONTENT.global[k];
-      });
     } catch (e) {
       console.error("content load failed", e);
     }
+    try {
+      const v = await fetchJson("GET", "/api/version");
+      const el = $("#sidebar-version");
+      if (el && v && v.version) el.textContent = "v" + v.version;
+    } catch { /* sidebar footer just stays as the placeholder */ }
     window.addEventListener("hashchange", route);
     route();
 

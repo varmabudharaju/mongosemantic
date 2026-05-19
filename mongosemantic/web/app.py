@@ -42,6 +42,10 @@ def create_app() -> FastAPI:
     def _content() -> JSONResponse:
         return JSONResponse(CONTENT)
 
+    @app.get("/api/version")
+    def _version() -> JSONResponse:
+        return JSONResponse({"version": __version__})
+
     app.include_router(_system_routes.router)
     app.include_router(_collections_routes.router)
     app.include_router(_apply_routes.router)
