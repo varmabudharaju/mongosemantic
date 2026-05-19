@@ -39,6 +39,15 @@
     <section id="page-connection" hidden>
       <h2 data-content="connection.title"></h2>
       <p  data-content="connection.subtitle"></p>
+      <aside class="page-help">
+        <strong>How to use</strong>
+        <ol>
+          <li>Paste your MongoDB connection URI (Atlas, replica set, or standalone).</li>
+          <li>Set the database name. Defaults to whatever's in the URI.</li>
+          <li>Click <em>Test connection</em> — the topology (atlas / replica_set / standalone) appears below.</li>
+        </ol>
+        <span class="try-line"><strong>Note:</strong> the URI is stored server-side in <code>.env</code> with chmod 600. It never reaches the browser.</span>
+      </aside>
       <form id="form-connection">
         <label data-content="connection.uri_label" for="conn-uri"></label>
         <input id="conn-uri" name="uri" data-placeholder="connection.uri_placeholder">
@@ -54,6 +63,14 @@
     <section id="page-collections" hidden>
       <h2 data-content="collections.title"></h2>
       <p  data-content="collections.subtitle"></p>
+      <aside class="page-help">
+        <strong>How to use</strong>
+        <ol>
+          <li><em>Inspect</em> opens field-level statistics and lets you configure semantic search.</li>
+          <li><em>Migrate model</em> appears on configured rows — switch embedding models with near-zero downtime.</li>
+          <li>The <em>Model</em> column shows the active embedding model and storage mode (shadow or inline).</li>
+        </ol>
+      </aside>
       <div class="table-wrap"><table id="collections-table"></table></div>
       <div id="collections-empty" class="card" style="padding:32px;text-align:center" hidden>
         <h3 data-content="collections.empty_title"></h3>
@@ -64,6 +81,15 @@
     <section id="page-inspect" hidden>
       <h2 id="inspect-title"></h2>
       <p  id="inspect-subtitle"></p>
+      <aside class="page-help">
+        <strong>How to use</strong>
+        <ol>
+          <li>Each row is a field path mongosemantic discovered when sampling this collection.</li>
+          <li>Look for fields rated <em>Great</em> or <em>Good</em> — those are rich text fields worth embedding.</li>
+          <li>Click <em>Configure semantic search</em> below the table to apply.</li>
+        </ol>
+        <span class="try-line"><strong>Bands:</strong> Great = long, varied text. Good = usable. Usable = short/sparse, combine with another field. Not recommended = IDs, numerics, dates.</span>
+      </aside>
       <div class="table-wrap"><table id="inspect-table"></table></div>
       <p style="margin-top:24px">
         <a id="inspect-apply-link" class="cta-link" href="#/apply/">Configure semantic search →</a>
@@ -73,6 +99,16 @@
     <section id="page-apply" hidden>
       <h2 data-content="apply.title"></h2>
       <p  data-content="apply.subtitle"></p>
+      <aside class="page-help">
+        <strong>How to use</strong>
+        <ol>
+          <li><em>Fields</em>: comma-separated paths (e.g. <code>title, body</code>). Each field gets its own embedding column.</li>
+          <li><em>Mode</em>: <em>shadow</em> writes embeddings to <code>{collection}_embeddings</code>. <em>inline</em> writes to <code>_msem.{field}</code> on each source doc.</li>
+          <li><em>Chunking</em> (shadow only): splits long text so search returns the best paragraph, not the best doc.</li>
+          <li><em>Model</em>: <code>local-fast</code> is free and runs on your CPU. OpenAI / Ollama need their respective env vars.</li>
+        </ol>
+        <span class="try-line"><strong>Tip:</strong> for most cases start with shadow + local-fast. You can migrate models later without downtime.</span>
+      </aside>
       <form id="form-apply"></form>
       <p id="apply-notice"></p>
     </section>
@@ -80,6 +116,14 @@
     <section id="page-indexing" hidden>
       <h2 id="indexing-title"></h2>
       <p  data-content="indexing.subtitle"></p>
+      <aside class="page-help">
+        <strong>How to use</strong>
+        <ol>
+          <li>The bar tracks docs whose embed jobs have been enqueued, not necessarily completed.</li>
+          <li>A worker (<code>mongosemantic worker</code> from a terminal) actually computes the embeddings.</li>
+          <li>You can leave this page — indexing runs in the background. Check the Dashboard for queue depth.</li>
+        </ol>
+      </aside>
       <div class="card" style="padding:24px">
         <progress id="indexing-progress" value="0" max="0"></progress>
         <p id="indexing-metric"></p>
@@ -89,6 +133,16 @@
     <section id="page-search" hidden>
       <h2>Search</h2>
       <p data-content="search.placeholder" style="display:none"></p>
+      <aside class="page-help">
+        <strong>How to use</strong>
+        <ol>
+          <li>Type a natural-language query — describe what you want, don't pick keywords.</li>
+          <li>Leave the collection dropdown on <em>All configured collections</em> to fan out, or pick one to scope.</li>
+          <li>Press <kbd>Enter</kbd> or click <em>Search</em>.</li>
+          <li>Toggle <em>Hybrid</em> to combine semantic with BM25 keyword (Atlas + shadow only; falls back to pure semantic elsewhere).</li>
+        </ol>
+        <span class="try-line"><strong>Try:</strong> <code>spies blackmail cold war Berlin</code>, <code>lonely astronaut stranded</code>, or <code>tragic love story during a war</code>.</span>
+      </aside>
       <form id="search-form" style="margin:0;padding:0;border:0;display:flex;gap:12px;background:transparent;box-shadow:none">
         <input id="search-q" type="search" data-placeholder="search.placeholder" style="flex:1;max-width:none">
         <button type="submit" id="search-go" style="white-space:nowrap">Search</button>
@@ -108,6 +162,16 @@
     <section id="page-query" hidden>
       <h2 data-content="aggregation.title"></h2>
       <p  data-content="aggregation.subtitle"></p>
+      <aside class="page-help">
+        <strong>How to use</strong>
+        <ol>
+          <li>Pick a collection from the dropdown (any collection, not just configured ones).</li>
+          <li>Write a MongoDB aggregation pipeline as a JSON array of stages.</li>
+          <li>Click <em>Run</em>. Hard limits: 10-second timeout, 100-row result cap.</li>
+          <li>Blocked stages: <code>$out</code>, <code>$merge</code>, <code>$function</code>, <code>$accumulator</code>, <code>$where</code>, <code>$jsonSchema</code>.</li>
+        </ol>
+        <span class="try-line"><strong>Try on <code>movies</code>:</strong> <code>[{"$group": {"_id": "$genres", "n": {"$sum": 1}}}, {"$sort": {"n": -1}}, {"$limit": 10}]</code></span>
+      </aside>
       <p  data-content="aggregation.safety_banner" id="query-banner"></p>
       <label for="query-collection">Collection</label>
       <select id="query-collection"></select>
@@ -120,6 +184,16 @@
     <section id="page-dashboard" hidden>
       <h2>Overview</h2>
       <p>Topology, configured collections, and queue health at a glance.</p>
+      <aside class="page-help">
+        <strong>How to use</strong>
+        <ol>
+          <li>Cards summarize the database state. Pending = jobs the worker hasn't drained yet.</li>
+          <li><em>Workers</em> shows every worker that's heartbeated recently (running &lt; 30s old, stale &lt; 5min, dead otherwise).</li>
+          <li><em>Recent failures</em> shows the last 10 failed embed jobs with their error message.</li>
+          <li><em>Retry failed jobs</em> resets all failed jobs back to pending.</li>
+        </ol>
+        <span class="try-line"><strong>To see Workers populate:</strong> run <code>mongosemantic worker</code> from a terminal.</span>
+      </aside>
       <div id="dashboard-cards"></div>
       <div style="margin-top:12px"><button id="dashboard-retry" class="ghost">Retry failed jobs</button></div>
       <h3 style="margin-top:24px">Workers</h3>
@@ -131,6 +205,16 @@
     <section id="page-visualize" hidden>
       <h2>Explore embeddings</h2>
       <p>2D PCA projection of sampled embeddings. Points close together mean similar by meaning.</p>
+      <aside class="page-help">
+        <strong>How to use</strong>
+        <ol>
+          <li>Pick a collection. If it has multiple configured fields, pick which one to plot.</li>
+          <li>Each dot is one embedding (or one chunk, for chunked collections).</li>
+          <li>Hover any dot to see its source text snippet.</li>
+          <li>Look for visual clusters — they correspond to semantically similar groups of documents.</li>
+        </ol>
+        <span class="try-line"><strong>Try on <code>movies</code>:</strong> distinct clusters for action, romance, war, comedy emerge from 23k unlabeled plots.</span>
+      </aside>
       <div class="search-controls">
         <select id="viz-collection"></select>
         <select id="viz-field"></select>
@@ -171,6 +255,15 @@
     <section id="page-mcp" hidden>
       <h2 data-content="mcp.title"></h2>
       <p  data-content="mcp.subtitle"></p>
+      <aside class="page-help">
+        <strong>How to use</strong>
+        <ol>
+          <li>Run the <code>integrate claude</code> command in a terminal — it writes mongosemantic into Claude Desktop's config file.</li>
+          <li>Quit and reopen Claude Desktop. The mongosemantic tools appear in the slash menu of every new chat.</li>
+          <li>Ask Claude something like "use mongosemantic to find movies about isolated astronauts" — it picks the right tool automatically.</li>
+        </ol>
+        <span class="try-line"><strong>Other clients:</strong> Cursor or anything that speaks MCP over SSE can connect with <code>mongosemantic serve --transport sse</code>.</span>
+      </aside>
 
       <h3 style="margin-top:24px">Claude Desktop</h3>
       <p data-content="mcp.integrate_intro"></p>

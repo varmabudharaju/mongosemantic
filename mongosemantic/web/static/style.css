@@ -553,6 +553,52 @@ pre#query-results {
   box-shadow: none;
 }
 
+/* page-level "how to use" callout — small, scannable, never the main focus */
+.page-help {
+  display: block;
+  background: #F4F8FA;
+  border-left: 3px solid var(--mdb-forest);
+  border-radius: var(--r-md);
+  padding: 12px 16px;
+  margin: 0 0 var(--space-5);
+  font-size: 13px;
+  color: var(--mdb-ink-muted);
+  max-width: 760px;
+}
+.page-help > strong {
+  display: block;
+  color: var(--mdb-ink);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.page-help ol, .page-help ul {
+  margin: 0 0 6px;
+  padding-left: 20px;
+  list-style: decimal;
+}
+.page-help ul { list-style: disc; }
+.page-help li { margin-bottom: 2px; }
+.page-help li::marker { color: var(--mdb-forest); }
+.page-help .try-line {
+  display: block;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--mdb-line);
+  color: var(--mdb-ink);
+}
+.page-help .try-line strong { color: var(--mdb-forest); display: inline; margin: 0; text-transform: none; letter-spacing: 0; font-size: 13px; }
+.page-help code {
+  background: var(--mdb-surface);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--mdb-ink);
+  border: 1px solid var(--mdb-line);
+}
+
 /* guide page content */
 #guide-content {
   max-width: 800px;

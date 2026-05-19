@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.2 — 2026-05-19
+
+- Every page now shows a compact "How to use" callout at the top with a
+  numbered 3-4 step recipe and a "Try:" line. Designed to make the UI
+  self-teaching — no need to alt-tab to docs.
+- Added `scripts/seed_mflix.py` for loading MongoDB's official
+  `sample_mflix` dataset (23,539 movies with plots/genres/cast). Pairs
+  with `mongosemantic apply -c movies -f title -f plot` for a realistic
+  semantic-search demo.
+
 ## 0.6.1 — 2026-05-19
 
 UI polish from user feedback after the v0.6.0 demo.
