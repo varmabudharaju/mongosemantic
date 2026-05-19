@@ -90,8 +90,15 @@ def apply_cmd(
         save_config(db, cfg)
 
         if conn.topology == Topology.ATLAS:
-            try:
-                for p in fields:
+            # Per-field try/except so a failure on field N doesn't hide the
+            # state of fields 1..N-1. Partial successes are kept (we don't
+            # roll back working indexes); failures get a clear summary and a
+            # non-zero exit so callers / CI catch them.
+            succeeded: list[str] = []
+            failed: list[tuple[str, str]] = []  # (field, error message)
+
+            for p in fields:
+                try:
                     if mode == "shadow":
                         name = create_atlas_vector_index(
                             db[shadow_name], collection, p, dim, path="embedding"
@@ -101,17 +108,46 @@ def apply_cmd(
                             db[shadow_name], search_index_name(collection, p)
                         )
                         console.print(
-                            f"[green]Atlas indexes created: vector={name}, search={search_name}[/green]"
+                            f"[green]Atlas indexes created for {p!r}: "
+                            f"vector={name}, search={search_name}[/green]"
                         )
                     else:
                         name = create_atlas_vector_index(
                             db[collection], collection, p, dim,
                             path=inline_embedding_path(p),
                         )
-                        console.print(f"[green]Atlas vector index created: {name}[/green]")
-            except Exception as e:
-                console.print(f"[yellow]Could not auto-create Atlas vector index: {e}[/yellow]")
-                for p in fields:
+                        console.print(
+                            f"[green]Atlas vector index created for {p!r}: {name}[/green]"
+                        )
+                    succeeded.append(p)
+                except Exception as e:  # noqa: BLE001 — surface anything Atlas threw
+                    failed.append((p, str(e)))
+                    console.print(
+                        f"[red]Atlas index creation failed for field {p!r}: {e}[/red]"
+                    )
+
+            if failed:
+                # M0 free tier caps FTS indexes at 3 per cluster. Multi-field
+                # shadow apply needs 2 indexes (vector + search) per field, so
+                # 2-field apply hits the cap. Detect by message contents so we
+                # don't need a separate Atlas API call to read the tier.
+                hit_fts_cap = any(
+                    "maximum number of fts indexes" in msg.lower() for _, msg in failed
+                )
+                console.print(
+                    f"[red]apply failed for {len(failed)} of {len(fields)} field(s); "
+                    f"succeeded: {succeeded or 'none'}; failed: {[f for f, _ in failed]}[/red]"
+                )
+                if hit_fts_cap:
+                    console.print(
+                        "[yellow]Atlas free tier (M0/M2/M5) limits search indexes to 3 per "
+                        "cluster. Each shadow-mode field needs 2 indexes (vectorSearch + "
+                        "search), so 2-field multi-field apply needs 4 — over the cap. "
+                        "Either use a single field, drop to one mode (omit hybrid), or "
+                        "upgrade to M10+.[/yellow]"
+                    )
+                console.print("[yellow]Suggested manual commands for failed fields:[/yellow]")
+                for p, _ in failed:
                     if mode == "shadow":
                         console.print(suggested_atlas_command(collection, p, shadow_name, dim))
                     else:
@@ -121,6 +157,7 @@ def apply_cmd(
                                 path=inline_embedding_path(p),
                             )
                         )
+                raise typer.Exit(code=2)
         else:
             console.print(
                 "[blue]No vector index created (self-hosted). Brute-force aggregation will be used — "
