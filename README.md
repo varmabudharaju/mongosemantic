@@ -159,6 +159,30 @@ docker compose up -d                          # replica set + standalone
 MONGOSEMANTIC_RUN_INTEGRATION=1 python3 -m pytest -v
 ```
 
+### Demo data
+
+Two seed scripts ship with the repo:
+
+```bash
+# Small hand-curated corpus (~185 articles + 38 products + 10 recipes).
+# Fast, offline, good for fast iteration.
+python3 scripts/seed_demo.py
+
+# MongoDB's official sample_mflix — 23,539 movies with plots, genres, cast.
+# ~40 MB download, ideal for realistic semantic-search demos.
+python3 scripts/seed_mflix.py
+```
+
+After seeding either dataset:
+
+```bash
+# For mflix:
+mongosemantic apply  -c movies -f title -f plot
+mongosemantic index  -c movies
+mongosemantic worker --once     # drains the queue and exits
+mongosemantic search "spies blackmail and intrigue in cold war Berlin" -c movies
+```
+
 ## License
 
 MIT
