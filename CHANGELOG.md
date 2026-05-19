@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.3 — 2026-05-19
+
+- UI layout: navigation moved from the top bar into a 240-px left
+  sidebar. Brand mark + nav items + version footer all live there;
+  main content gets the full content width on the right.
+- Each nav item now has a small icon for faster scanning.
+- Active item gets an inset green bar instead of an underline.
+- On screens under 920 px the sidebar collapses behind a hamburger
+  toggle in the top-left corner; tapping outside closes it.
+
 ## 0.6.2 — 2026-05-19
 
 - Every page now shows a compact "How to use" callout at the top with a

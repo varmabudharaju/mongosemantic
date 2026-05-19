@@ -73,6 +73,8 @@
       if (el) el.hidden = (p !== name);
     });
     $$("#app-nav a").forEach(a => a.toggleAttribute("aria-current", a.dataset.page === name));
+    // Auto-close the mobile sidebar after a nav click.
+    document.body.classList.remove("sidebar-open");
   }
 
   function toast(msg) {
@@ -650,6 +652,19 @@
     }
     window.addEventListener("hashchange", route);
     route();
+
+    // Mobile sidebar toggle. Click outside (the overlay) also closes it.
+    const toggle = $("#sidebar-toggle");
+    if (toggle) {
+      toggle.onclick = () => document.body.classList.toggle("sidebar-open");
+    }
+    document.addEventListener("click", (ev) => {
+      if (!document.body.classList.contains("sidebar-open")) return;
+      const sb = $("#app-sidebar");
+      if (sb && !sb.contains(ev.target) && ev.target !== toggle && !toggle.contains(ev.target)) {
+        document.body.classList.remove("sidebar-open");
+      }
+    });
 
     const cf = $("#form-connection");
     if (cf) cf.addEventListener("submit", async ev => {
