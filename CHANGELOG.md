@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.0 — 2026-05-18
+
+- New `mongosemantic migrate -c X -m Y` command — switches a shadow-mode
+  collection's embedding model with near-zero downtime by building new
+  embeddings into a temp shadow and atomically renaming it into place.
+  `--drop-archive` removes the old shadow after a successful swap; default
+  keeps it for rollback.
+- New `migrate_model` MCP tool (now 11 total) and `POST
+  /api/collections/{name}/migrate` web endpoint.
+- `CollectionConfig` gains optional `vector_index_names`,
+  `search_index_names`, and `migrated_at` fields. Search code prefers
+  stored index names over computed ones, so migrations can swap in
+  uniquely-named Atlas indexes without a search-path change. Older
+  configs without these fields keep working unchanged.
+- Migration is resume-friendly: an interrupted run can be re-invoked
+  and will skip chunks already written to the temp shadow.
+- Inline-mode collections are rejected with a clear error (would require
+  duplicating user data); convert to shadow mode first.
+
 ## 0.4.0 — 2026-05-18
 
 - Hybrid search: combines `$vectorSearch` (semantic) and `$search` (BM25) via

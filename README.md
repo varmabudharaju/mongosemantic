@@ -41,6 +41,24 @@ The dashboard provides:
 - Read-only aggregation runner (10s timeout, 100-doc limit)
 - Job queue dashboard with retry / reindex
 
+## Online model migration
+
+Switch a shadow-mode collection to a different embedding model with
+near-zero downtime:
+
+```bash
+mongosemantic migrate --collection articles --model local-better
+```
+
+Builds new embeddings into a temp shadow collection, then atomically
+swaps it into place via `renameCollection`. Search keeps serving the
+old model up to the swap instant, then the new model immediately after.
+The previous shadow is kept as `articles_embeddings_archive_{timestamp}`
+for rollback — drop it with `--drop-archive` (or manually) once verified.
+
+Available as the `migrate_model` MCP tool too. Shadow-mode only;
+inline-mode collections are rejected with a clear error.
+
 ## Hybrid search (Atlas)
 
 Combine semantic similarity with BM25 keyword matching, fused via Atlas
@@ -64,7 +82,7 @@ mongosemantic integrate claude          # writes Claude Desktop config (restart 
 mongosemantic serve --transport sse     # or run as a standalone SSE server on :8090
 ```
 
-Ten tools are exposed:
+Eleven tools are exposed:
 
 | Tool | What it does |
 |---|---|
@@ -78,8 +96,9 @@ Ten tools are exposed:
 | `get_status` | Topology + total embeddings + job-queue counts |
 | `safe_aggregation` | Read-only pipeline runner (10s, 100-row, no `$out`/`$merge`/`$function`) |
 | `get_schema_context` | Compact schema summary for AI-generated aggregations |
+| `migrate_model` | Switch a collection's embedding model with near-zero downtime |
 
-## Status (v0.4.0)
+## Status (v0.5.0 — feature-complete roadmap)
 
 - [x] Connect to Atlas / replica set / standalone
 - [x] Inspect a collection, score fields for suitability
@@ -92,7 +111,7 @@ Ten tools are exposed:
 - [x] Web UI with seven pages and a safe aggregation runner
 - [x] **MCP server** for Claude Desktop / Cursor / any MCP client (stdio + SSE)
 - [x] **Atlas hybrid search** — semantic + keyword via `$rankFusion` (`--hybrid` / UI toggle / `hybrid_search` MCP tool)
-- [ ] Zero-downtime model migration _(v0.5.0)_
+- [x] **Online model migration** — `mongosemantic migrate` + `migrate_model` MCP tool, atomic `renameCollection` swap
 
 ## Embedding models
 
