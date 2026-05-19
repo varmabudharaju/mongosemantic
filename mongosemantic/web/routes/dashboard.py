@@ -106,8 +106,10 @@ class TeardownRequest(BaseModel):
 
 
 @router.post("/api/collections/{name}/teardown")
-def teardown(name: str, req: TeardownRequest = TeardownRequest()) -> dict:
+def teardown(name: str, req: TeardownRequest | None = None) -> dict:
     from mongosemantic.web.identifiers import IdentifierError, validate_identifier
+    if req is None:
+        req = TeardownRequest()
     try:
         validate_identifier(name)
     except IdentifierError as e:
