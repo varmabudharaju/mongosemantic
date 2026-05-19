@@ -147,3 +147,27 @@ def count_by_status(db: Database) -> dict[str, int]:
     ]):
         out[row["_id"]] = row["n"]
     return out
+
+
+def recent_failed_jobs(db: Database, limit: int = 10) -> list[dict]:
+    """Most recently failed jobs, with the last_error message — for surfacing
+    in `status` and the dashboard so failures are actionable, not just a count."""
+    cursor = (
+        db[JOBS_COLLECTION]
+        .find({"status": "failed"})
+        .sort("enqueued_at", -1)
+        .limit(limit)
+    )
+    return [
+        {
+            "id": str(doc.get("_id")),
+            "collection": doc.get("collection"),
+            "source_id": str(doc.get("source_id")) if doc.get("source_id") is not None else None,
+            "field_path": doc.get("field_path"),
+            "kind": doc.get("kind"),
+            "attempts": doc.get("attempts"),
+            "last_error": doc.get("last_error"),
+            "enqueued_at": doc.get("enqueued_at"),
+        }
+        for doc in cursor
+    ]

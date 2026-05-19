@@ -12,17 +12,38 @@ from mongosemantic.embeddings.provider import get_provider
 from mongosemantic.state import ensure_indexes, list_configured
 from mongosemantic.sync.change_stream import ChangeStreamListener
 from mongosemantic.sync.polling import poll_once
-from mongosemantic.worker.runner import WorkerRunner
+from mongosemantic.worker.runner import WorkerRunner, process_batch
 
 console = Console()
 
 
-def run_worker(poll_interval: int, batch_size: int) -> None:
+def _drain_once(db, provider, batch_size: int) -> int:
+    """Process every pending job and exit. Used by `worker --once`."""
+    total = 0
+    while True:
+        n = process_batch(db, provider, worker_id="drain", batch_size=batch_size)
+        if n == 0:
+            break
+        total += n
+    return total
+
+
+def run_worker(poll_interval: int, batch_size: int, once: bool = False) -> None:
     settings = Settings()
     conn = MongoConnection.open(settings.uri, settings.database)
     db = conn.db
     ensure_indexes(db)
     provider = get_provider(settings.model)
+    if once:
+        # One-shot drain: skip change streams / polling / heartbeat. Useful
+        # for cron, scripted demos, or quick ad-hoc catch-up runs.
+        if conn.topology == Topology.STANDALONE:
+            for cfg in list_configured(db):
+                poll_once(db, cfg.collection)
+        n = _drain_once(db, provider, batch_size)
+        console.print(f"[green]Drained {n} job(s) and exiting.[/green]")
+        conn.close()
+        return
     runner = WorkerRunner(db, provider, batch_size=batch_size)
     threads: list[threading.Thread] = []
     threads.append(threading.Thread(target=runner.run, name="embed-worker", daemon=True))

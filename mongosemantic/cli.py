@@ -40,7 +40,12 @@ app.command("migrate")(_migrate_mod.migrate_cmd)
 def worker_cmd(
     poll_interval: int = typer.Option(30, "--poll-interval", help="Polling seconds (standalone)"),
     batch_size: int = typer.Option(32, "--batch-size"),
+    once: bool = typer.Option(
+        False, "--once",
+        help="Drain the queue once and exit. Skips change streams + heartbeat. "
+             "Useful for cron jobs and ad-hoc catch-up runs."
+    ),
 ) -> None:
     """Run the sync + embedding background worker."""
     from mongosemantic.commands.worker_cmd import run_worker
-    run_worker(poll_interval=poll_interval, batch_size=batch_size)
+    run_worker(poll_interval=poll_interval, batch_size=batch_size, once=once)

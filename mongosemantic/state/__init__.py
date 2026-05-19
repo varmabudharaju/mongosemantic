@@ -6,6 +6,13 @@ from mongosemantic.state.config_store import (
     load_config,
     save_config,
 )
+from mongosemantic.state.heartbeat import (
+    WorkerHeartbeat,
+    list_heartbeats,
+    prune_dead,
+    remove_heartbeat,
+    write_heartbeat,
+)
 from mongosemantic.state.job_queue import (
     claim_batch,
     complete,
@@ -14,6 +21,7 @@ from mongosemantic.state.job_queue import (
     enqueue_embed,
     ensure_indexes,
     fail,
+    recent_failed_jobs,
     reset_failed,
 )
 from mongosemantic.state.resume_tokens import (
@@ -37,9 +45,15 @@ __all__ = [
     "complete",
     "fail",
     "reset_failed",
+    "recent_failed_jobs",
     "count_by_status",
     "save_resume_token",
     "load_resume_token",
     "save_polling_watermark",
     "load_polling_watermark",
+    "WorkerHeartbeat",
+    "write_heartbeat",
+    "remove_heartbeat",
+    "list_heartbeats",
+    "prune_dead",
 ]

@@ -9,7 +9,9 @@ from mongosemantic.state import (
     count_by_status,
     ensure_indexes,
     list_configured,
+    list_heartbeats,
     load_config,
+    recent_failed_jobs,
     reset_failed,
 )
 from mongosemantic.sync.enqueue import enqueue_for_doc
@@ -47,6 +49,27 @@ def dashboard() -> dict:
             ],
             "total_embeddings": total_embeddings,
             "jobs": count_by_status(db),
+            "workers": [
+                {
+                    "worker_id": hb.worker_id,
+                    "status": hb.status,
+                    "started_at": hb.started_at.isoformat(),
+                    "last_heartbeat": hb.last_heartbeat.isoformat(),
+                    "jobs_processed": hb.jobs_processed,
+                }
+                for hb in list_heartbeats(db)
+            ],
+            "recent_failed": [
+                {
+                    "collection": f.get("collection"),
+                    "source_id": f.get("source_id"),
+                    "field_path": f.get("field_path"),
+                    "kind": f.get("kind"),
+                    "attempts": f.get("attempts"),
+                    "last_error": f.get("last_error"),
+                }
+                for f in recent_failed_jobs(db, limit=10)
+            ],
         }
     finally:
         conn.close()

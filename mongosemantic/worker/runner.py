@@ -16,7 +16,11 @@ from mongosemantic.state import (
     complete,
     fail,
     load_config,
+    remove_heartbeat,
+    write_heartbeat,
 )
+
+HEARTBEAT_INTERVAL_S = 10.0
 
 log = logging.getLogger("mongosemantic.worker")
 
@@ -154,13 +158,34 @@ class WorkerRunner:
         self.idle_sleep = idle_sleep
         self.worker_id = f"worker-{uuid.uuid4().hex[:8]}"
         self._stop = threading.Event()
+        self._started_at = _utcnow()
+        self._jobs_processed = 0
+        self._last_heartbeat = 0.0
 
     def stop(self) -> None:
         self._stop.set()
+        try:
+            remove_heartbeat(self.db, self.worker_id)
+        except Exception:
+            log.exception("failed to remove heartbeat for %s", self.worker_id)
+
+    def _maybe_heartbeat(self) -> None:
+        now = time.monotonic()
+        if now - self._last_heartbeat >= HEARTBEAT_INTERVAL_S:
+            try:
+                write_heartbeat(
+                    self.db, self.worker_id, self._jobs_processed, self._started_at
+                )
+            except Exception:
+                log.exception("heartbeat write failed for %s", self.worker_id)
+            self._last_heartbeat = now
 
     def run(self) -> None:
         log.info("worker %s starting", self.worker_id)
+        self._maybe_heartbeat()
         while not self._stop.is_set():
             n = process_batch(self.db, self.provider, self.worker_id, self.batch_size)
+            self._jobs_processed += n
+            self._maybe_heartbeat()
             if n == 0:
                 time.sleep(self.idle_sleep)
