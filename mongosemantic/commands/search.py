@@ -12,6 +12,7 @@ from mongosemantic.exceptions import NotConfiguredError
 from mongosemantic.search.atlas import build_atlas_pipeline
 from mongosemantic.search.brute_force import build_brute_pipeline
 from mongosemantic.search.cross_collection import min_max_normalize, per_collection_targets
+from mongosemantic.search.hybrid import build_hybrid_pipeline, search_index_name
 from mongosemantic.search.inline import build_inline_atlas_pipeline, build_inline_brute_pipeline
 from mongosemantic.state import load_config
 
@@ -68,10 +69,49 @@ def _run_one(db, cfg, collection: str, query_vec: list[float], limit: int, topol
     merged.sort(key=lambda r: r.get("score", 0.0), reverse=True)
     return merged[:limit]
 
+
+def hybrid_available(cfg, topology: Topology) -> bool:
+    """Hybrid requires Atlas + shadow mode (we need a chunk_text column to index)."""
+    return topology == Topology.ATLAS and cfg.mode == "shadow"
+
+
+def _run_hybrid_field(
+    db, cfg, collection: str, field_path: str, query_text: str,
+    query_vec: list[float], limit: int,
+):
+    shadow = db[cfg.shadow_collection]
+    pipeline = build_hybrid_pipeline(
+        source_collection=collection,
+        field_path=field_path,
+        query_text=query_text,
+        query_vector=query_vec,
+        limit=limit,
+        vector_index_name=vector_index_name(collection, field_path),
+        search_index_name=search_index_name(collection, field_path),
+    )
+    rows = list(shadow.aggregate(pipeline))
+    for r in rows:
+        r["source_collection"] = collection
+    return rows
+
+
+def run_one_hybrid(db, cfg, collection: str, query_text: str,
+                   query_vec: list[float], limit: int, topology: Topology):
+    """Hybrid version of `_run_one` — fans out across every field, merges, top-k."""
+    merged: list[dict] = []
+    for spec in cfg.fields:
+        merged.extend(
+            _run_hybrid_field(db, cfg, collection, spec.path, query_text, query_vec, limit)
+        )
+    merged.sort(key=lambda r: r.get("score", 0.0), reverse=True)
+    return merged[:limit]
+
 def search_cmd(
     query: str = typer.Argument(...),
     collection: str | None = typer.Option(None, "--collection", "-c"),
     limit: int = typer.Option(10, "--limit"),
+    hybrid: bool = typer.Option(False, "--hybrid",
+        help="Combine semantic + keyword search (Atlas + shadow mode only)."),
 ) -> None:
     """Search by meaning. Omit --collection to search all configured collections."""
     settings = Settings()
@@ -81,11 +121,21 @@ def search_cmd(
         provider = get_provider(settings.model)
         qvec = provider.embed(query).tolist()
 
+        def _run(cfg, name):
+            if hybrid and hybrid_available(cfg, conn.topology):
+                return run_one_hybrid(db, cfg, name, query, qvec, limit, conn.topology)
+            return _run_one(db, cfg, name, qvec, limit, conn.topology)
+
         if collection:
             cfg = load_config(db, collection)
             if not cfg:
                 raise NotConfiguredError(f"{collection} not configured")
-            rows = _run_one(db, cfg, collection, qvec, limit, conn.topology)
+            if hybrid and not hybrid_available(cfg, conn.topology):
+                console.print(
+                    "[yellow]Hybrid search requires Atlas + shadow-mode collections. "
+                    "Falling back to pure semantic.[/yellow]"
+                )
+            rows = _run(cfg, collection)
         else:
             all_rows: list[dict] = []
             targets = per_collection_targets(db)
@@ -97,8 +147,7 @@ def search_cmd(
                 if cfg is None:
                     continue
                 models_per_collection[name] = cfg.embedding_model
-                rows = _run_one(db, cfg, name, qvec, limit, conn.topology)
-                all_rows.extend(rows)
+                all_rows.extend(_run(cfg, name))
             if len(set(models_per_collection.values())) > 1:
                 all_rows = min_max_normalize(all_rows, "score")
             all_rows.sort(key=lambda r: r.get("score", 0.0), reverse=True)

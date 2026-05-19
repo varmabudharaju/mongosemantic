@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 
-from mongosemantic.commands.search import _run_one
+from mongosemantic.commands.search import _run_one, hybrid_available, run_one_hybrid
 from mongosemantic.config import Settings
 from mongosemantic.db.client import MongoConnection
 from mongosemantic.embeddings.provider import get_provider
@@ -35,6 +35,7 @@ def search(
     q: str = Query(..., min_length=1, max_length=2000),
     collection: str | None = Query(None),
     limit: int = Query(10, ge=1, le=100),
+    hybrid: bool = Query(False),
 ) -> dict:
     if collection:
         try:
@@ -43,15 +44,24 @@ def search(
             raise HTTPException(status_code=400, detail=str(e)) from e
     settings = Settings()
     conn = MongoConnection.open(settings.uri, settings.database)
+    notice: str | None = None
     try:
         db = conn.db
         provider = get_provider(settings.model)
         qvec = provider.embed(q).tolist()
+
+        def _run(cfg, name):
+            if hybrid and hybrid_available(cfg, conn.topology):
+                return run_one_hybrid(db, cfg, name, q, qvec, limit, conn.topology)
+            return _run_one(db, cfg, name, qvec, limit, conn.topology)
+
         if collection:
             cfg = load_config(db, collection)
             if not cfg:
                 raise HTTPException(status_code=400, detail=f"{collection} is not configured")
-            rows = _run_one(db, cfg, collection, qvec, limit, conn.topology)
+            if hybrid and not hybrid_available(cfg, conn.topology):
+                notice = "hybrid requires Atlas + shadow mode — falling back to pure semantic"
+            rows = _run(cfg, collection)
         else:
             targets = per_collection_targets(db)
             if not targets:
@@ -63,11 +73,11 @@ def search(
                 if cfg is None:
                     continue
                 models[name] = cfg.embedding_model
-                all_rows.extend(_run_one(db, cfg, name, qvec, limit, conn.topology))
+                all_rows.extend(_run(cfg, name))
             if len(set(models.values())) > 1:
                 all_rows = min_max_normalize(all_rows, "score")
             all_rows.sort(key=lambda r: r.get("score", 0), reverse=True)
             rows = all_rows[:limit]
-        return {"query": q, "rows": [_serialize(r) for r in rows]}
+        return {"query": q, "rows": [_serialize(r) for r in rows], "notice": notice}
     finally:
         conn.close()

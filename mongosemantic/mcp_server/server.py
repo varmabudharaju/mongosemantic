@@ -116,6 +116,25 @@ def create_mcp() -> FastMCP:
             conn.close()
 
     @app.tool()
+    def hybrid_search(query: str, collection: str, limit: int = 10) -> dict:
+        """Find documents in `collection` by combining semantic similarity and
+        keyword (BM25) matching, fused via Atlas `$rankFusion`.
+
+        Use this when the query mixes meaning and specific terms — e.g.
+        "MongoDB 7.0 replica set issues" benefits from both signals (semantic
+        catches "replica set" → "replication", keyword anchors on "7.0").
+        Requires Atlas + shadow-mode collections; falls back to pure
+        semantic search with a notice otherwise.
+        """
+        conn = _open()
+        try:
+            return t.t_hybrid_search(
+                conn.db, conn.topology, query, collection, limit=limit
+            )
+        finally:
+            conn.close()
+
+    @app.tool()
     def search_all_collections(query: str, limit: int = 10) -> dict:
         """Like semantic_search but fans out across every configured collection
         at once, then merges and ranks the combined results.

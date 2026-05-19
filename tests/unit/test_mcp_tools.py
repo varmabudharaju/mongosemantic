@@ -173,6 +173,51 @@ def test_search_all_collections_merges_across_configs():
     assert {r["source_collection"] for r in out["rows"]} == {"articles", "products"}
 
 
+# -- hybrid_search ---------------------------------------------------------
+
+def test_hybrid_search_falls_back_to_semantic_on_self_hosted():
+    """Replica-set / standalone don't have $rankFusion — falls back to vector
+    only, but reports it in `notice` so callers know the result is degraded."""
+    db = _db()
+    _shadow_cfg(db)
+    fake_provider = MagicMock()
+    fake_provider.embed = lambda q: np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    with patch("mongosemantic.mcp_server.tools.get_provider", return_value=fake_provider), \
+         patch("mongosemantic.mcp_server.tools._run_one", return_value=[]) as semantic:
+        out = t.t_hybrid_search(db, Topology.REPLICA_SET, "q", "articles")
+        semantic.assert_called_once()
+    assert out["mode"] == "semantic_fallback"
+    assert "hybrid requires Atlas" in out["notice"]
+
+
+def test_hybrid_search_uses_hybrid_path_on_atlas_shadow():
+    db = _db()
+    _shadow_cfg(db)
+    fake_provider = MagicMock()
+    fake_provider.embed = lambda q: np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    fake_rows = [{"source_id": "a", "source_collection": "articles",
+                  "field_path": "body", "chunk_text": "t", "score": 0.9}]
+    with patch("mongosemantic.mcp_server.tools.get_provider", return_value=fake_provider), \
+         patch("mongosemantic.mcp_server.tools.run_one_hybrid", return_value=fake_rows) as hyb:
+        out = t.t_hybrid_search(db, Topology.ATLAS, "q", "articles")
+        hyb.assert_called_once()
+    assert out["mode"] == "hybrid"
+    assert out["notice"] is None
+
+
+def test_hybrid_search_falls_back_for_inline_mode():
+    """Inline collections don't have a chunk_text column to index — hybrid
+    can't run even on Atlas."""
+    db = _db()
+    _inline_cfg(db)
+    fake_provider = MagicMock()
+    fake_provider.embed = lambda q: np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    with patch("mongosemantic.mcp_server.tools.get_provider", return_value=fake_provider), \
+         patch("mongosemantic.mcp_server.tools._run_one", return_value=[]):
+        out = t.t_hybrid_search(db, Topology.ATLAS, "q", "products")
+    assert out["mode"] == "semantic_fallback"
+
+
 # -- safe_aggregation --------------------------------------------------------
 
 def test_safe_aggregation_runs_match_count():

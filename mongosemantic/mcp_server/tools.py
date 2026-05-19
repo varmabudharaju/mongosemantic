@@ -11,7 +11,7 @@ from typing import Any
 
 from pymongo.database import Database
 
-from mongosemantic.commands.search import _run_one
+from mongosemantic.commands.search import _run_one, hybrid_available, run_one_hybrid
 from mongosemantic.db.client import Topology
 from mongosemantic.db.schema import inspect_collection as _inspect
 from mongosemantic.db.schema import score_field
@@ -180,6 +180,34 @@ def t_semantic_search(
     return {
         "query": query,
         "collection": collection,
+        "rows": [_serialize_row(r) for r in rows],
+    }
+
+
+# -----------------------------------------------------------------------------
+# Tool: hybrid_search (Atlas + shadow only)
+# -----------------------------------------------------------------------------
+def t_hybrid_search(
+    db: Database, topology: Topology, query: str, collection: str, limit: int = 10
+) -> dict:
+    cfg = load_config(db, collection)
+    if not cfg:
+        raise ValueError(f"{collection!r} is not configured for semantic search")
+    provider = get_provider(cfg.embedding_model)
+    qvec = provider.embed(query).tolist()
+    if hybrid_available(cfg, topology):
+        rows = run_one_hybrid(db, cfg, collection, query, qvec, limit, topology)
+        notice = None
+    else:
+        rows = _run_one(db, cfg, collection, qvec, limit, topology)
+        notice = (
+            "hybrid requires Atlas + shadow mode; returned pure semantic results"
+        )
+    return {
+        "query": query,
+        "collection": collection,
+        "mode": "hybrid" if notice is None else "semantic_fallback",
+        "notice": notice,
         "rows": [_serialize_row(r) for r in rows],
     }
 
