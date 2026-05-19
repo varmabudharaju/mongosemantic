@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock
 
+import pytest
+
 from mongosemantic.db.client import Topology, detect_topology
 
 
@@ -42,3 +44,51 @@ def test_open_propagates_connection_failure(monkeypatch):
         import pytest
         with pytest.raises(ServerSelectionTimeoutError):
             MongoConnection.open("mongodb://bogus:27017", "db")
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "mongodb+srv://user:pw@example.mongodb.net/",
+        "mongodb://localhost:27017/",
+    ],
+)
+def test_open_defaults_tls_ca_file_to_certifi(uri):
+    """Regression: MongoConnection.open must default tlsCAFile to certifi.where()
+    so TLS connections work on systems whose Python lacks a discoverable system
+    CA bundle (notably macOS python.org / Apple Python). Applied for every URI
+    in the absence of an explicit user setting — pymongo ignores it for non-TLS
+    connections, so it's safe to set unconditionally."""
+    from unittest.mock import MagicMock, patch
+
+    import certifi
+
+    from mongosemantic.db.client import MongoConnection
+
+    fake_client = MagicMock()
+    fake_client.admin.command.return_value = {}
+    with patch("mongosemantic.db.client.MongoClient", return_value=fake_client) as mc:
+        MongoConnection.open(uri, "db")
+    _, kwargs = mc.call_args
+    assert kwargs.get("tlsCAFile") == certifi.where(), (
+        f"MongoClient must default tlsCAFile to certifi.where(); got kwargs={kwargs}"
+    )
+
+
+def test_open_respects_user_tls_ca_file_in_uri():
+    """Regression: if the user already specifies tlsCAFile in the URI (e.g. a
+    corporate/private CA), MongoConnection.open must NOT silently override it
+    with certifi's bundle."""
+    from unittest.mock import MagicMock, patch
+
+    from mongosemantic.db.client import MongoConnection
+
+    fake_client = MagicMock()
+    fake_client.admin.command.return_value = {}
+    uri = "mongodb+srv://user:pw@example.mongodb.net/?tlsCAFile=/etc/corp/ca.pem"
+    with patch("mongosemantic.db.client.MongoClient", return_value=fake_client) as mc:
+        MongoConnection.open(uri, "db")
+    _, kwargs = mc.call_args
+    assert "tlsCAFile" not in kwargs, (
+        f"tlsCAFile must not be injected when URI already specifies it; got kwargs={kwargs}"
+    )

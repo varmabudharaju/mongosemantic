@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+import certifi
 from pymongo import MongoClient
 
 
@@ -30,7 +31,15 @@ class MongoConnection:
 
     @classmethod
     def open(cls, uri: str, database_name: str) -> MongoConnection:
-        client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+        # Default tlsCAFile to certifi's bundle so TLS verification works on
+        # systems whose Python lacks a discoverable system CA bundle (notably
+        # macOS python.org / Apple Python without Install Certificates.command).
+        # Skipped when the URI already specifies tlsCAFile so users with a
+        # private/corporate CA aren't silently overridden.
+        kwargs: dict = {"serverSelectionTimeoutMS": 5000}
+        if "tlsCAFile" not in uri:
+            kwargs["tlsCAFile"] = certifi.where()
+        client = MongoClient(uri, **kwargs)
         info = client.admin.command("hello")  # single call, reused by detect_topology
         return cls(
             client=client,
