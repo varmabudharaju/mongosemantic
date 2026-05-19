@@ -183,6 +183,18 @@ mongosemantic worker --once     # processes all pending jobs, then exits
 mongosemantic search "spies blackmail and intrigue in cold war Berlin" -c movies
 ```
 
+## Project docs
+
+If you want to dig in further:
+
+| | |
+|---|---|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Module map, data flow diagrams, storage layout, key design decisions. The technical reference. |
+| [`docs/HANDOFF.md`](docs/HANDOFF.md) | Current state: what's working, what's not live-tested, what was intentionally left out, what's worth shipping next. |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Dev setup, test strategy, where to add a new CLI command / embedding provider / web route / MCP tool / search mode. |
+| [`docs/atlas-setup.md`](docs/atlas-setup.md) | 10-minute runbook for verifying the Atlas-specific paths (`$vectorSearch`, hybrid `$rankFusion`, migration index name carry-over) against a free-tier M0 cluster. |
+| [`CHANGELOG.md`](CHANGELOG.md) | Per-version summary of what landed and why. |
+
 ## License
 
 MIT
