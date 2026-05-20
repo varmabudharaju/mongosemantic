@@ -1,9 +1,10 @@
 """Tier 3 — Atlas $search BM25 index creation and queryability.
 
-Reuses the state established by Tier 2 (test_vector_search.py): shadow
-multi-field apply on title + plot, with both vector + BM25 indexes already
-created on the embeddings collection. No teardown — purely a read-side
-verification.
+Reuses the state established by Tier 2 (test_t2_vector_search.py): shadow
+single-field apply on `title`, which creates both a vector and a BM25 index
+on `embedded_movies_embeddings`. No teardown — purely a read-side
+verification. Filename starts with `test_t3_` so pytest's alphabetical
+collection order matches tier order (tier 2 sets state, tier 3 reads it).
 """
 from __future__ import annotations
 
@@ -21,8 +22,8 @@ def test_bm25_index_present_and_queryable(
     db = atlas_client[atlas_db_name]
     cfg = load_config(db, atlas_collection_name)
     assert cfg is not None, (
-        "no mongosemantic config found — Tier 2 (test_vector_search.py) must "
-        "run first to establish the multi-field shadow state."
+        "no mongosemantic config found — Tier 2 (test_t2_vector_search.py) "
+        "must run first to establish the single-field shadow state."
     )
 
     shadow = db[f"{atlas_collection_name}_embeddings"]

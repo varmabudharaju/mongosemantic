@@ -14,7 +14,7 @@ import pytest
 from typer.testing import CliRunner
 
 from mongosemantic.cli import app
-from mongosemantic.db.indexes import vector_index_name
+from mongosemantic.db.indexes import atlas_vector_index_exists, vector_index_name
 from mongosemantic.embeddings.provider import get_provider
 from mongosemantic.state import load_config
 from mongosemantic.worker.runner import process_batch
@@ -61,15 +61,21 @@ def test_vector_search_single_field(
     )
     wait_for_search_index_queryable(shadow, idx_title, timeout=180)
 
-    # Search and assert Atlas-side ranking shape.
+    # The real distinguisher between Atlas $vectorSearch and the brute-force
+    # fallback is whether commands/search.py:_run_one_field finds an Atlas
+    # vector index for the field. Assert that gate directly — checking score
+    # magnitude is unreliable because local-fast embeddings are L2-normalised
+    # and brute-force dot products also land in [0, 1].
+    assert atlas_vector_index_exists(shadow, atlas_collection_name, "title"), (
+        "Atlas vector index missing on shadow — search would silently fall back "
+        "to brute force"
+    )
+
+    # End-to-end smoke that search returns hits using the Atlas-side path.
     r = runner.invoke(app, [
         "search", "heist gone wrong",
         "--collection", atlas_collection_name,
         "--limit", "5",
     ])
     assert r.exit_code == 0, r.output
-    # Atlas-side $vectorSearch produces cosine-ish scores in [0, 1].
-    # Brute-force fallback would show dot-product scores well above 1.
-    assert "0." in r.output, (
-        f"expected fractional similarity scores, got:\n{r.output}"
-    )
+    assert "Score" in r.output, f"expected result table, got:\n{r.output}"

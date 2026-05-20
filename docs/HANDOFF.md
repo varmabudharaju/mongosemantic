@@ -72,7 +72,7 @@ data, plus a real Atlas M0 cluster for the Atlas-only paths (as of v0.7.5):
 - **Atlas `$rankFusion` hybrid** — RRF-fused results verified
 - **Atlas TLS via certifi** — works without manual `SSL_CERT_FILE` on macOS
 
-Test surface: **203 unit + 10 integration + 6 Atlas integration**, all
+Test surface: **203 unit + 10 integration + 9 Atlas integration**, all
 green, lint clean. Unit tests run offline (mongomock); integration tests
 need docker; Atlas tests need `MONGOSEMANTIC_RUN_ATLAS_INTEGRATION=1` +
 `MONGOSEMANTIC_ATLAS_URI`.

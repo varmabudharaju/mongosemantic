@@ -101,9 +101,10 @@ def test_inline_mode_writes_under_msem(
         "no source doc has _msem.plot after inline indexing — inline write path "
         "may not be hooked up correctly for Atlas"
     )
-    # The embedding may live under .embedding or .vector depending on schema.
+    # Inline writes the vector under _msem.{field}.embedding (see
+    # db/queries.py — there is no .vector fallback).
     msem = sample["_msem"]["plot"]
-    vec = msem.get("embedding") or msem.get("vector")
+    vec = msem.get("embedding")
     assert isinstance(vec, list) and len(vec) >= 384, (
-        f"expected an embedding vector under _msem.plot, got {msem!r}"
+        f"expected an embedding vector under _msem.plot.embedding, got {msem!r}"
     )
