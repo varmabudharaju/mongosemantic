@@ -12,7 +12,6 @@ from typer.testing import CliRunner
 from mongosemantic.cli import app
 from mongosemantic.embeddings.provider import get_provider
 from mongosemantic.worker.runner import process_batch
-
 from tests.integration.atlas.conftest import wait_for_no_mongosemantic_search_indexes
 
 

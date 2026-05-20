@@ -11,7 +11,6 @@ import pytest
 
 from mongosemantic.search.hybrid import search_index_name
 from mongosemantic.state import load_config
-
 from tests.integration.atlas.conftest import wait_for_search_index_queryable
 
 

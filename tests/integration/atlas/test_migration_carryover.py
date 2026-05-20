@@ -14,13 +14,7 @@ Cost: ~30+ min on Atlas M0 — re-embedding with the 768-d model dominates.
 """
 from __future__ import annotations
 
-import re
-
 import pytest
-from tests.integration.atlas.conftest import (
-    wait_for_no_mongosemantic_search_indexes,
-    wait_for_search_index_queryable,
-)
 from typer.testing import CliRunner
 
 from mongosemantic.cli import app
@@ -28,6 +22,10 @@ from mongosemantic.db.indexes import vector_index_name
 from mongosemantic.embeddings.provider import get_provider
 from mongosemantic.state import load_config
 from mongosemantic.worker.runner import process_batch
+from tests.integration.atlas.conftest import (
+    wait_for_no_mongosemantic_search_indexes,
+    wait_for_search_index_queryable,
+)
 
 
 def _top_hit_text(runner: CliRunner, collection: str, query: str) -> str | None:
@@ -105,13 +103,16 @@ def test_migration_carries_over_indexes_and_top_hit(
     # during the swap window) so it's structurally impossible on the free
     # tier. Skip (not fail) when we detect that specific Atlas error —
     # users on M10+ will see the full migration path exercised.
-    if r.exit_code != 0 and r.exception is not None:
-        if "maximum number of FTS indexes" in str(r.exception):
-            pytest.skip(
-                "Online migration requires 4 concurrent FTS indexes during "
-                "the swap window; Atlas M0/M2/M5 caps at 3. Re-run on M10+ "
-                "to exercise this path."
-            )
+    if (
+        r.exit_code != 0
+        and r.exception is not None
+        and "maximum number of FTS indexes" in str(r.exception)
+    ):
+        pytest.skip(
+            "Online migration requires 4 concurrent FTS indexes during "
+            "the swap window; Atlas M0/M2/M5 caps at 3. Re-run on M10+ "
+            "to exercise this path."
+        )
     assert r.exit_code == 0, r.output
 
     # Post-migration: cfg should reflect new model and dim.
@@ -152,6 +153,3 @@ def test_migration_carries_over_indexes_and_top_hit(
     )
 
 
-# Suppress unused-import warning — re module retained in case top-hit parsing
-# needs to be tightened (e.g. fall back to regex against an ObjectId).
-_re_unused = re
