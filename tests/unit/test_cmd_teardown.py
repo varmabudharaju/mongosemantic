@@ -70,6 +70,38 @@ def test_teardown_clears_pending_jobs_for_that_collection(monkeypatch):
     )
 
 
+def test_teardown_with_no_pending_jobs_does_not_print_cleared_notice(monkeypatch):
+    """The 'Cleared N pending job(s)' line should only fire when N > 0.
+    Pins the no-op branch so future refactors don't surprise users with a
+    'Cleared 0 pending job(s)' message."""
+    _env(monkeypatch)
+    fake_db = mongomock.MongoClient()["d"]
+    fake_conn = MagicMock()
+    fake_conn.db = fake_db
+    from datetime import datetime, timezone
+
+    from mongosemantic.db.client import Topology
+    fake_conn.topology = Topology.REPLICA_SET
+
+    # Save a config but DON'T enqueue any jobs.
+    save_config(fake_db, CollectionConfig(
+        collection="movies", mode="shadow", shadow_collection="movies_embeddings",
+        fields=[FieldSpec(path="title")],
+        embedding_model="local-fast", embedding_dim=384,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    ))
+    assert fake_db[JOBS_COLLECTION].count_documents({}) == 0
+
+    with patch("mongosemantic.commands.teardown.MongoConnection.open", return_value=fake_conn):
+        r = runner.invoke(app, ["teardown", "--collection", "movies", "--yes"])
+        assert r.exit_code == 0, r.output
+
+    assert "Cleared" not in r.output and "pending job" not in r.output, (
+        f"no jobs to clear -> no 'Cleared N' line; got:\n{r.output}"
+    )
+
+
 def test_teardown_does_not_touch_other_collections_jobs(monkeypatch):
     """Belt-and-suspenders for the deletion query: only THIS collection's
     jobs should disappear, never another collection's."""
