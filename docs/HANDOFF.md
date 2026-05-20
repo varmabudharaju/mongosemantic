@@ -50,43 +50,38 @@ Every tag is pushed. Nothing is local-only.
 ## What's working (live-tested)
 
 Confirmed against the docker-compose replica set + standalone on the demo
-data:
+data, plus a real Atlas M0 cluster for the Atlas-only paths (as of v0.7.5):
 
 - **Apply / index / search** across shadow mode, inline mode, and shadow + chunking
-- **Multi-field embedding** with merged scoring
+- **Multi-field embedding** with merged scoring (unit-tested; on Atlas use
+  single-field on M0 — multi-field needs M10+ due to the FTS-index cap)
 - **Cross-collection fanout** ranked by similarity
 - **Chunked search** returns paragraph excerpts, not whole docs
 - **Change-stream sync** (live insert auto-embeds)
 - **Polling sync** on standalone via `updated_at` watermark
 - **Worker heartbeat** — dashboard reflects running / stale / dead
 - **Online migration** — `local-fast` 384 d → `local-better` 768 d on
-  replica set with the search still working after the swap
+  replica set with the search still working after the swap (Atlas: M10+
+  only; M0/M2/M5 can't fit the 4-index swap window)
 - **Hybrid fallback** with explicit `notice` on self-hosted / inline
 - **Safe aggregation** with stage allowlist
 - **MCP server** via stdio (Claude Desktop) and SSE (Cursor / others)
 - **Web UI** end-to-end across all pages, against 23 k+ real movies
+- **Atlas `$vectorSearch`** — live-tested end-to-end on `sample_mflix.embedded_movies`
+- **Atlas `$search` (BM25)** — index creation + querying verified
+- **Atlas `$rankFusion` hybrid** — RRF-fused results verified
+- **Atlas TLS via certifi** — works without manual `SSL_CERT_FILE` on macOS
 
-Test surface: **191 unit + 10 integration**, all green, lint clean.
-Unit tests run offline (mongomock); integration tests need docker.
+Test surface: **203 unit + 10 integration + 6 Atlas integration**, all
+green, lint clean. Unit tests run offline (mongomock); integration tests
+need docker; Atlas tests need `MONGOSEMANTIC_RUN_ATLAS_INTEGRATION=1` +
+`MONGOSEMANTIC_ATLAS_URI`.
 
----
-
-## What's working but **not live-tested against real Atlas**
-
-All four are logically reviewed and follow Atlas's documented contracts,
-but the only Mongo I've exercised them against is the rs0 replica set
-(no `$vectorSearch`, no `$search`, no `$rankFusion`).
-
-- Vector index creation (`db.createSearchIndex({type: "vectorSearch"})`)
-- `$vectorSearch` aggregation
-- `$search` BM25 aggregation
-- `$rankFusion` hybrid path
-- Migration vector-index carry-over after rename
-
-There is a 10-minute Atlas verification runbook at
-[`atlas-setup.md`](atlas-setup.md). If you run it and find anything, please
-file an issue — those code paths are the largest review-vs-execute gap in
-the project.
+The 10-minute Atlas runbook at [`atlas-setup.md`](atlas-setup.md) is
+re-walkable; each documented path also has a corresponding test under
+`tests/integration/atlas/` so you can re-run end-to-end with a single
+command. Bugs found during the original walkthrough are all fixed and
+shipped as v0.7.2–v0.7.5.
 
 ---
 
@@ -236,13 +231,12 @@ A few ideas, ordered by usefulness:
 1. **Publish to PyPI.** Currently install is `pip install -e .` from
    source. The `pyproject.toml` is already set up for `hatchling`; a
    `python3 -m build && twine upload dist/*` should work.
-2. **Run the Atlas runbook** — the biggest review-vs-execution gap.
-3. **K-means clustering + keyword labels on visualize.** Real value
+2. **K-means clustering + keyword labels on visualize.** Real value
    bump for the demo story.
-4. **Per-collection retry button** in the dashboard's failed-jobs
+3. **Per-collection retry button** in the dashboard's failed-jobs
    section (the API already supports it).
-5. **Worker garbage-collection** — wire up `prune_dead` to run at
+4. **Worker garbage-collection** — wire up `prune_dead` to run at
    `worker` startup or as a cron.
-6. **A real changelog publisher** — `release-please` or
+5. **A real changelog publisher** — `release-please` or
    `python-semantic-release` could automate version bumps from commit
    messages, since the commits already follow conventional-commits.
