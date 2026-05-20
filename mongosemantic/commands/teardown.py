@@ -7,6 +7,7 @@ from mongosemantic.config import Settings
 from mongosemantic.db.client import MongoConnection
 from mongosemantic.exceptions import NotConfiguredError
 from mongosemantic.state import delete_config, load_config
+from mongosemantic.state.job_queue import JOBS_COLLECTION
 
 console = Console()
 
@@ -41,6 +42,17 @@ def teardown_cmd(
             elif cfg.shadow_collection:
                 db.drop_collection(cfg.shadow_collection)
                 console.print(f"[blue]Dropped {cfg.shadow_collection}.[/blue]")
+        # Drop pending jobs for this collection. Otherwise a teardown ->
+        # re-apply leaves orphan jobs for the old config in the queue; the
+        # worker pulls them FIFO ahead of the new config's jobs and embeds
+        # under the OLD field path, masking the new config's progress.
+        # Note: we only drop pending/in_flight; completed/failed are kept so
+        # operators can audit history.
+        deleted = db[JOBS_COLLECTION].delete_many(
+            {"collection": collection, "status": {"$in": ["pending", "in_flight"]}}
+        ).deleted_count
+        if deleted:
+            console.print(f"[blue]Cleared {deleted} pending job(s) for {collection}.[/blue]")
         delete_config(db, collection)
         console.print(f"[green]Removed semantic-search config for {collection}.[/green]")
     finally:
