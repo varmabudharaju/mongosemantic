@@ -138,13 +138,19 @@ def test_teardown_inline_drops_atlas_vector_index_on_source(monkeypatch):
 
     # mongomock doesn't support list/drop search indexes natively; patch the
     # Collection methods used by the teardown path so we can verify the call.
+    # The fake list returns:
+    #   - two `mongosemantic_movies_*` (vector + BM25 for THIS collection)
+    #   - one `mongosemantic_articles_*` (a different mongosemantic-owned
+    #     collection that lives in the same db) — must NOT be touched
+    #   - one Atlas-native index — must NOT be touched
     with (
         patch("mongosemantic.commands.teardown.MongoConnection.open", return_value=fake_conn),
         patch("mongomock.Collection.drop_search_index", new=fake_drop_search_index, create=True),
         patch("mongomock.Collection.list_search_indexes",
               new=lambda self: iter([
                   {"name": "mongosemantic_movies_3c6de1b7"},
-                  {"name": "mongosemantic_movies_0fee558e"},
+                  {"name": "mongosemantic_search_movies_3c6de1b7"},
+                  {"name": "mongosemantic_articles_deadbeef"},
                   {"name": "unrelated_atlas_index"},
               ]),
               create=True),
@@ -153,17 +159,59 @@ def test_teardown_inline_drops_atlas_vector_index_on_source(monkeypatch):
         assert r.exit_code == 0, r.output
 
     dropped_names = {n for _, n in dropped_indexes}
-    # Both mongosemantic_movies_* indexes should have been dropped.
+    # Both this-collection's mongosemantic indexes should be dropped.
     assert "mongosemantic_movies_3c6de1b7" in dropped_names, (
-        f"teardown must drop inline vector indexes on source; dropped={dropped_indexes}"
+        f"teardown must drop the inline vector index for this collection; dropped={dropped_indexes}"
     )
-    assert "mongosemantic_movies_0fee558e" in dropped_names, (
-        f"teardown must drop ALL mongosemantic_* indexes on source; dropped={dropped_indexes}"
+    assert "mongosemantic_search_movies_3c6de1b7" in dropped_names, (
+        f"teardown must drop the BM25 search index for this collection; dropped={dropped_indexes}"
+    )
+    # OTHER mongosemantic collections' indexes must not be touched — the
+    # prefix match is per-collection-scoped.
+    assert "mongosemantic_articles_deadbeef" not in dropped_names, (
+        f"teardown must NOT touch other mongosemantic collections' indexes; dropped={dropped_indexes}"
     )
     # Non-mongosemantic indexes must NOT be touched.
     assert "unrelated_atlas_index" not in dropped_names, (
         f"teardown must only drop mongosemantic-owned indexes; dropped={dropped_indexes}"
     )
+
+
+def test_teardown_inline_silently_skips_on_non_atlas_backend(monkeypatch):
+    """For self-hosted Mongo (or mongomock), `list_search_indexes` either
+    raises `OperationFailure` (CommandNotSupported) or `AttributeError`.
+    The helper must swallow both quietly without aborting the teardown."""
+    from datetime import datetime, timezone
+
+    from pymongo.errors import OperationFailure
+
+    _env(monkeypatch)
+    fake_db = mongomock.MongoClient()["d"]
+    fake_conn = MagicMock()
+    fake_conn.db = fake_db
+    from mongosemantic.db.client import Topology
+    fake_conn.topology = Topology.ATLAS
+
+    save_config(fake_db, CollectionConfig(
+        collection="movies", mode="inline", shadow_collection=None,
+        fields=[FieldSpec(path="plot")],
+        embedding_model="local-fast", embedding_dim=384,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    ))
+
+    def raise_op_failure(self):
+        raise OperationFailure("CommandNotSupported: $listSearchIndexes")
+
+    with (
+        patch("mongosemantic.commands.teardown.MongoConnection.open", return_value=fake_conn),
+        patch("mongomock.Collection.list_search_indexes", new=raise_op_failure, create=True),
+    ):
+        r = runner.invoke(app, ["teardown", "--collection", "movies", "--yes"])
+
+    # Teardown must complete cleanly — the OperationFailure is a normal
+    # "this isn't Atlas" signal, not a real error.
+    assert r.exit_code == 0, r.output
 
 
 def test_teardown_does_not_touch_other_collections_jobs(monkeypatch):

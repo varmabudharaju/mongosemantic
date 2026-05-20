@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import typer
+from pymongo.collection import Collection
+from pymongo.errors import OperationFailure
 from rich.console import Console
 
 from mongosemantic.config import Settings
@@ -12,22 +14,33 @@ from mongosemantic.state.job_queue import JOBS_COLLECTION
 console = Console()
 
 
-def _drop_mongosemantic_search_indexes(coll) -> None:
-    """Drop every Atlas search index on `coll` whose name starts with
-    `mongosemantic`. Safe-fails on collections that don't support search
-    indexes (e.g. non-Atlas, mongomock). Non-mongosemantic indexes are
-    never touched."""
+def _drop_mongosemantic_search_indexes(coll: Collection, collection_name: str) -> None:
+    """Drop Atlas search indexes on `coll` that this library created for
+    `collection_name` — i.e. names starting with `mongosemantic_{name}_` or
+    `mongosemantic_search_{name}_`. Foreign indexes (other mongosemantic
+    collections, user-managed, Atlas-native) are never touched.
+
+    `list_search_indexes` is only available on Atlas; on self-hosted Mongo
+    pymongo raises `OperationFailure` (CommandNotSupported) and mongomock
+    raises `AttributeError`. Both are normal "no-op here" signals and are
+    swallowed. Any other exception (network blip, auth lapse) propagates so
+    a transient failure doesn't silently re-orphan the index this fix is
+    meant to remove."""
+    own_prefixes = (
+        f"mongosemantic_{collection_name}_",
+        f"mongosemantic_search_{collection_name}_",
+    )
     try:
         indexes = list(coll.list_search_indexes())
-    except Exception:
-        return
+    except (OperationFailure, AttributeError):
+        return  # not an Atlas-backed collection; nothing to do
     for idx in indexes:
         name = idx.get("name", "")
-        if name.startswith("mongosemantic"):
+        if any(name.startswith(p) for p in own_prefixes):
             try:
                 coll.drop_search_index(name)
                 console.print(f"[blue]Dropped Atlas search index {name}.[/blue]")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — per-index drop should not abort the loop
                 console.print(
                     f"[yellow]Could not drop search index {name}: {e}[/yellow]"
                 )
@@ -86,7 +99,7 @@ def teardown_cmd(
                 # index orphaned — it survives, consumes an FTS-index slot
                 # (M0 caps at 3), and confuses later `apply` calls. Drop any
                 # mongosemantic_*-named search indexes on the source.
-                _drop_mongosemantic_search_indexes(db[collection])
+                _drop_mongosemantic_search_indexes(db[collection], collection)
             elif cfg.shadow_collection:
                 # For shadow mode, dropping the collection also removes its
                 # Atlas search indexes — no extra step needed.
