@@ -1,4 +1,13 @@
-"""Tier 2 — $vectorSearch with multi-field embedding (title + plot)."""
+"""Tier 2 — $vectorSearch on Atlas (single-field for M0 compatibility).
+
+Note on single-field choice: Atlas M0/M2/M5 cap search indexes at 3 per
+cluster. A shadow-mode multi-field apply needs 2 indexes per field
+(vectorSearch + search for hybrid), so 2-field apply hits the cap at 4 > 3
+and partially fails (now caught loudly by the fix in v0.7.3). For the
+verification suite we use a single field — covers the $vectorSearch path
+end-to-end while remaining runnable on the free tier. The multi-field
+*merge* logic is unit-tested in tests/unit/test_search_pipelines.py.
+"""
 from __future__ import annotations
 
 import pytest
@@ -14,7 +23,7 @@ from tests.integration.atlas.conftest import wait_for_search_index_queryable
 
 
 @pytest.mark.atlas
-def test_vector_search_multi_field(
+def test_vector_search_single_field(
     atlas_client,
     atlas_dataset_loaded,
     env_pointing_at_atlas,
@@ -27,11 +36,11 @@ def test_vector_search_multi_field(
     # Clean slate from any prior tier.
     runner.invoke(app, ["teardown", "--collection", atlas_collection_name, "--yes"])
 
-    # Apply multi-field: title + plot.
+    # Single-field shadow apply: 2 indexes total (vector + BM25 for `title`),
+    # fits M0's 3-index cap with one slot to spare.
     r = runner.invoke(app, [
         "apply", "--collection", atlas_collection_name,
         "--field", "title",
-        "--field", "plot",
         "--mode", "shadow",
     ])
     assert r.exit_code == 0, r.output

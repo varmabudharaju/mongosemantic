@@ -31,12 +31,13 @@ def test_bm25_index_present_and_queryable(
     info = wait_for_search_index_queryable(shadow, bm25_idx, timeout=180)
     assert info.get("queryable") is True
 
-    # Run a literal $search query against the BM25 index.
-    # 'gangster' should hit Scarface, Goodfellas, etc. — common mflix tokens.
+    # Query the indexed path `chunk_text` — mongosemantic's shadow layout
+    # stores the indexed text under chunk_text regardless of source field
+    # name (see db/indexes.py:search_index_definition).
     pipeline = [
-        {"$search": {"index": bm25_idx, "text": {"query": "gangster", "path": "title"}}},
+        {"$search": {"index": bm25_idx, "text": {"query": "gangster", "path": "chunk_text"}}},
         {"$limit": 5},
-        {"$project": {"_id": 0, "score": {"$meta": "searchScore"}}},
+        {"$project": {"_id": 0, "chunk_text": 1, "score": {"$meta": "searchScore"}}},
     ]
     hits = list(shadow.aggregate(pipeline))
     assert len(hits) > 0, "BM25 $search returned zero hits for 'gangster'"
