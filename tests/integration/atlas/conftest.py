@@ -86,6 +86,38 @@ def wait_for_search_index_queryable(
     )
 
 
+def wait_for_no_mongosemantic_search_indexes(
+    db, collections: list[str], timeout: float = 120.0, poll: float = 3.0
+) -> None:
+    """Poll until all mongosemantic_* search indexes across `collections`
+    are fully deleted on Atlas.
+
+    Atlas `dropSearchIndex` is asynchronous: the index disappears from
+    `listSearchIndexes` immediately but still counts against the
+    per-cluster FTS-index cap (3 on M0/M2/M5) until cleanup completes.
+    Without this wait, a teardown -> apply sequence in the same test
+    can spuriously hit the cap.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        remaining = []
+        for cname in collections:
+            try:
+                for idx in db[cname].list_search_indexes():
+                    if idx.get("name", "").startswith("mongosemantic"):
+                        remaining.append(f"{cname}:{idx['name']}")
+            except Exception:
+                pass
+        if not remaining:
+            # Extra grace: Atlas's cap accounting can lag past list visibility.
+            time.sleep(5)
+            return
+        time.sleep(poll)
+    raise TimeoutError(
+        f"mongosemantic_* indexes still present after {timeout}s: {remaining}"
+    )
+
+
 @pytest.fixture
 def env_pointing_at_atlas(monkeypatch, atlas_uri: str, atlas_db_name: str):
     """Sets MONGOSEMANTIC_* env vars pointing CliRunner invocations at Atlas."""
