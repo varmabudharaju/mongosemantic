@@ -12,6 +12,27 @@ from mongosemantic.state.job_queue import JOBS_COLLECTION
 console = Console()
 
 
+def _drop_mongosemantic_search_indexes(coll) -> None:
+    """Drop every Atlas search index on `coll` whose name starts with
+    `mongosemantic`. Safe-fails on collections that don't support search
+    indexes (e.g. non-Atlas, mongomock). Non-mongosemantic indexes are
+    never touched."""
+    try:
+        indexes = list(coll.list_search_indexes())
+    except Exception:
+        return
+    for idx in indexes:
+        name = idx.get("name", "")
+        if name.startswith("mongosemantic"):
+            try:
+                coll.drop_search_index(name)
+                console.print(f"[blue]Dropped Atlas search index {name}.[/blue]")
+            except Exception as e:
+                console.print(
+                    f"[yellow]Could not drop search index {name}: {e}[/yellow]"
+                )
+
+
 def teardown_cmd(
     collection: str = typer.Option(..., "--collection", "-c"),
     drop_data: bool = typer.Option(
@@ -59,7 +80,16 @@ def teardown_cmd(
             if cfg.mode == "inline":
                 db[collection].update_many({}, {"$unset": {"_msem": ""}})
                 console.print(f"[blue]Cleared inline _msem on {collection}.[/blue]")
+                # Inline mode creates the Atlas vector index ON THE SOURCE
+                # collection (the embedding lives under _msem.{field}.embedding
+                # on each source doc). Dropping the data alone leaves the
+                # index orphaned — it survives, consumes an FTS-index slot
+                # (M0 caps at 3), and confuses later `apply` calls. Drop any
+                # mongosemantic_*-named search indexes on the source.
+                _drop_mongosemantic_search_indexes(db[collection])
             elif cfg.shadow_collection:
+                # For shadow mode, dropping the collection also removes its
+                # Atlas search indexes — no extra step needed.
                 db.drop_collection(cfg.shadow_collection)
                 console.print(f"[blue]Dropped {cfg.shadow_collection}.[/blue]")
         delete_config(db, collection)

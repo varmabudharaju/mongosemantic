@@ -102,6 +102,70 @@ def test_teardown_with_no_pending_jobs_does_not_print_cleared_notice(monkeypatch
     )
 
 
+def test_teardown_inline_drops_atlas_vector_index_on_source(monkeypatch):
+    """Regression: for inline mode on Atlas, apply creates a vector index on
+    the SOURCE collection (the embedding lives under _msem.{field}.embedding
+    on each source doc). teardown must also drop that index. Previously
+    teardown only unset _msem and left the index orphaned on the source —
+    consuming an Atlas FTS-index slot forever (M0/M2/M5 cap of 3).
+
+    Surfaced by tier 6 of the Atlas verification suite: after tier 5's
+    inline phase, the orphan index on embedded_movies blocked tier 6's
+    apply because Atlas refused to create a new index over the cap.
+    """
+    from datetime import datetime, timezone
+
+    _env(monkeypatch)
+    fake_db = mongomock.MongoClient()["d"]
+    fake_conn = MagicMock()
+    fake_conn.db = fake_db
+    from mongosemantic.db.client import Topology
+    fake_conn.topology = Topology.ATLAS
+
+    # Set up an inline-mode config (no shadow collection, _msem on source).
+    save_config(fake_db, CollectionConfig(
+        collection="movies", mode="inline", shadow_collection=None,
+        fields=[FieldSpec(path="plot"), FieldSpec(path="title")],
+        embedding_model="local-fast", embedding_dim=384,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    ))
+
+    dropped_indexes: list[tuple[str, str]] = []
+
+    def fake_drop_search_index(self, name):
+        dropped_indexes.append((self.name, name))
+
+    # mongomock doesn't support list/drop search indexes natively; patch the
+    # Collection methods used by the teardown path so we can verify the call.
+    with (
+        patch("mongosemantic.commands.teardown.MongoConnection.open", return_value=fake_conn),
+        patch("mongomock.Collection.drop_search_index", new=fake_drop_search_index, create=True),
+        patch("mongomock.Collection.list_search_indexes",
+              new=lambda self: iter([
+                  {"name": "mongosemantic_movies_3c6de1b7"},
+                  {"name": "mongosemantic_movies_0fee558e"},
+                  {"name": "unrelated_atlas_index"},
+              ]),
+              create=True),
+    ):
+        r = runner.invoke(app, ["teardown", "--collection", "movies", "--yes"])
+        assert r.exit_code == 0, r.output
+
+    dropped_names = {n for _, n in dropped_indexes}
+    # Both mongosemantic_movies_* indexes should have been dropped.
+    assert "mongosemantic_movies_3c6de1b7" in dropped_names, (
+        f"teardown must drop inline vector indexes on source; dropped={dropped_indexes}"
+    )
+    assert "mongosemantic_movies_0fee558e" in dropped_names, (
+        f"teardown must drop ALL mongosemantic_* indexes on source; dropped={dropped_indexes}"
+    )
+    # Non-mongosemantic indexes must NOT be touched.
+    assert "unrelated_atlas_index" not in dropped_names, (
+        f"teardown must only drop mongosemantic-owned indexes; dropped={dropped_indexes}"
+    )
+
+
 def test_teardown_does_not_touch_other_collections_jobs(monkeypatch):
     """Belt-and-suspenders for the deletion query: only THIS collection's
     jobs should disappear, never another collection's."""
