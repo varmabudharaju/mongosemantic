@@ -75,26 +75,77 @@
 
     <section id="page-connection" hidden>
       <h2 data-content="connection.title"></h2>
-      <p  data-content="connection.subtitle"></p>
-      <aside class="page-help">
-        <strong>How to use</strong>
-        <ol>
-          <li>Paste your MongoDB connection URI (Atlas, replica set, or standalone).</li>
-          <li>Set the database name. Defaults to whatever's in the URI.</li>
-          <li>Click <em>Test connection</em> — the topology (atlas / replica_set / standalone) appears below.</li>
-        </ol>
-        <span class="try-line"><strong>Note:</strong> the URI is stored server-side in <code>.env</code> with chmod 600. It never reaches the browser.</span>
+
+      <!-- Banners (shown conditionally by app.js) -->
+      <div id="conn-banner-env" class="banner banner-info" hidden data-content="connection.banner_env_override"></div>
+      <div id="conn-banner-saved" class="banner banner-success" hidden></div>
+      <div id="conn-banner-pending" class="banner banner-warning" hidden data-content="connection.banner_pending_restart"></div>
+
+      <p id="conn-subtitle"></p>
+
+      <!-- State 1: NOT CONNECTED -->
+      <div id="conn-state-disconnected" class="conn-block" hidden>
+        <div class="conn-hero">
+          <h3 data-content="connection.hero_title"></h3>
+          <p  data-content="connection.hero_body"></p>
+        </div>
+        <form id="conn-form-new">
+          <label data-content="connection.uri_label" for="conn-form-new-uri"></label>
+          <input id="conn-form-new-uri" name="uri" data-placeholder="connection.uri_placeholder">
+          <label data-content="connection.db_label" for="conn-form-new-db"></label>
+          <input id="conn-form-new-db" name="database" data-placeholder="connection.db_placeholder">
+          <div style="margin-top:16px">
+            <button type="submit" data-content="connection.connect_button"></button>
+          </div>
+          <div id="conn-form-new-error" class="conn-error" hidden></div>
+        </form>
+      </div>
+
+      <!-- State 2/3: CONNECTED (status card) -->
+      <div id="conn-state-connected" class="conn-block" hidden>
+        <div class="conn-status-card">
+          <div class="conn-status-dot"></div>
+          <h3 id="conn-status-title"></h3>
+          <dl id="conn-status-rows"></dl>
+          <p id="conn-test-result" class="conn-test-result" hidden></p>
+          <div class="conn-actions">
+            <button id="conn-btn-test" type="button" data-content="connection.test_button"></button>
+            <button id="conn-btn-change" type="button" data-content="connection.change_button"></button>
+            <button id="conn-btn-disconnect" type="button" class="btn-danger" data-content="connection.disconnect_button"></button>
+          </div>
+        </div>
+
+        <!-- Change form (hidden until "Change connection" clicked) -->
+        <form id="conn-form-change" hidden>
+          <label data-content="connection.uri_label" for="conn-form-change-uri"></label>
+          <input id="conn-form-change-uri" name="uri">
+          <label data-content="connection.db_label" for="conn-form-change-db"></label>
+          <input id="conn-form-change-db" name="database">
+          <div style="margin-top:16px">
+            <button type="submit" data-content="connection.save_button"></button>
+            <button type="button" id="conn-form-change-cancel" data-content="connection.cancel_button"></button>
+          </div>
+          <div id="conn-form-change-error" class="conn-error" hidden></div>
+        </form>
+      </div>
+
+      <!-- Dev help (always visible) -->
+      <aside class="page-help conn-devhelp">
+        <strong data-content="connection.devhelp_title"></strong>
+
+        <p class="conn-devhelp-section-title" data-content="connection.devhelp_env_state_title"></p>
+        <dl id="conn-devhelp-env"></dl>
+
+        <p class="conn-devhelp-section-title" data-content="connection.devhelp_config_path_title"></p>
+        <code id="conn-devhelp-path"></code>
+
+        <p class="conn-devhelp-section-title" data-content="connection.devhelp_quickref_title"></p>
+        <ul>
+          <li data-content="connection.devhelp_quickref_format"></li>
+          <li data-content="connection.devhelp_quickref_atlas"></li>
+          <li data-content="connection.devhelp_quickref_restart"></li>
+        </ul>
       </aside>
-      <form id="form-connection">
-        <label data-content="connection.uri_label" for="conn-uri"></label>
-        <input id="conn-uri" name="uri" data-placeholder="connection.uri_placeholder">
-        <label data-content="connection.db_label" for="conn-db"></label>
-        <input id="conn-db" name="database">
-        <small data-content="connection.db_helper"></small>
-        <div style="margin-top:24px"><button type="submit" data-content="connection.test_button"></button></div>
-        <p id="conn-state"></p>
-        <small data-content="connection.footer_note"></small>
-      </form>
     </section>
 
     <section id="page-collections" hidden>
