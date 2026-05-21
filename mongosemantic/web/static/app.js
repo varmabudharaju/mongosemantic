@@ -89,6 +89,211 @@
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 
+  // ---- connection page state machine + actions ---------------------------
+
+  async function renderConnectionPage() {
+    // Hide all sub-blocks; the fetch will reveal the right one.
+    $("#conn-state-disconnected").hidden = true;
+    $("#conn-state-connected").hidden = true;
+    $("#conn-banner-env").hidden = true;
+    $("#conn-banner-saved").hidden = true;
+    $("#conn-banner-pending").hidden = true;
+
+    let stateRes, pathRes;
+    try {
+      [stateRes, pathRes] = await Promise.all([
+        fetchJson("GET", "/api/connection"),
+        fetchJson("GET", "/api/connection/config-path"),
+      ]);
+    } catch (e) {
+      toast("Failed to load connection state: " + e.message);
+      return;
+    }
+
+    const subtitleKeys = {
+      not_connected: "subtitle_disconnected",
+      connected_ui:  "subtitle_connected_ui",
+      connected_env: "subtitle_connected_env",
+    };
+    $("#conn-subtitle").textContent =
+      CONTENT.connection[subtitleKeys[stateRes.state] || "subtitle_disconnected"];
+
+    renderConnDevHelp(stateRes.env_overrides, pathRes.path);
+
+    if (stateRes.state === "not_connected") {
+      $("#conn-state-disconnected").hidden = false;
+      wireConnNewForm();
+      setNavDisabled(true);
+      return;
+    }
+
+    setNavDisabled(false);
+
+    $("#conn-state-connected").hidden = false;
+    renderConnStatusCard(stateRes);
+    wireConnConnectedActions(stateRes);
+
+    if (stateRes.state === "connected_env") {
+      $("#conn-banner-env").hidden = false;
+      $("#conn-btn-change").hidden = true;
+      $("#conn-btn-disconnect").hidden = true;
+    } else {
+      $("#conn-btn-change").hidden = false;
+      $("#conn-btn-disconnect").hidden = false;
+    }
+
+    if (sessionStorage.getItem("msem.connection.pending")) {
+      $("#conn-banner-pending").hidden = false;
+    }
+  }
+
+  function renderConnStatusCard(state) {
+    const c = CONTENT.connection;
+    $("#conn-status-title").textContent = `Connected to ${state.database}`;
+    const rows = [
+      [c.status_label_uri, state.uri_redacted],
+      [c.status_label_database, state.database],
+      [c.status_label_topology, state.topology || "—"],
+      [c.status_label_mongo_version, state.mongo_version || "—"],
+      [c.status_label_model, state.model],
+      [c.status_label_configured, String(state.configured_count)],
+    ];
+    const dl = $("#conn-status-rows");
+    dl.innerHTML = "";
+    for (const [k, v] of rows) {
+      const dt = document.createElement("dt"); dt.textContent = k;
+      const dd = document.createElement("dd"); dd.textContent = v;
+      dl.appendChild(dt); dl.appendChild(dd);
+    }
+    // Reset any prior test result.
+    const tr = $("#conn-test-result"); tr.hidden = true; tr.className = "conn-test-result"; tr.textContent = "";
+  }
+
+  function renderConnDevHelp(overrides, configPath) {
+    const c = CONTENT.connection;
+    const envDl = $("#conn-devhelp-env");
+    envDl.innerHTML = "";
+    const labelFor = { uri: "MONGOSEMANTIC_URI", db: "MONGOSEMANTIC_DB", model: "MONGOSEMANTIC_MODEL" };
+    for (const key of ["uri", "db", "model"]) {
+      const dt = document.createElement("dt"); dt.textContent = labelFor[key];
+      const dd = document.createElement("dd");
+      dd.textContent = overrides[key] ? c.devhelp_env_yes : c.devhelp_env_no;
+      dd.className = overrides[key] ? "env-set" : "env-unset";
+      envDl.appendChild(dt); envDl.appendChild(dd);
+    }
+    $("#conn-devhelp-path").textContent = configPath;
+  }
+
+  function wireConnNewForm() {
+    const form = $("#conn-form-new");
+    const errBox = $("#conn-form-new-error");
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      errBox.hidden = true;
+      const uri = $("#conn-form-new-uri").value.trim();
+      const database = $("#conn-form-new-db").value.trim();
+      let res;
+      try { res = await fetchJson("POST", "/api/connection/save", { uri, database }); }
+      catch (err) { res = { ok: false, error: { code: "http_error", message: String(err), hint: "", details: "" } }; }
+      if (!res.ok) { showConnError(errBox, res.error); return; }
+      sessionStorage.setItem("msem.connection.pending", "1");
+      showSavedBanner(CONTENT.connection.banner_restart_required_save);
+      renderConnectionPage();
+    };
+  }
+
+  function wireConnConnectedActions(state) {
+    const c = CONTENT.connection;
+
+    $("#conn-btn-test").onclick = async () => {
+      const resBox = $("#conn-test-result");
+      resBox.hidden = false;
+      resBox.className = "conn-test-result";
+      resBox.textContent = c.test_running;
+      let res;
+      try { res = await fetchJson("POST", "/api/connection/test", {}); }
+      catch (err) { res = { ok: false, error: { code: "http_error", message: String(err), hint: "", details: "" } }; }
+      if (res.ok) {
+        resBox.className = "conn-test-result success";
+        resBox.textContent = c.test_success
+          .replace("{latency_ms}", res.latency_ms)
+          .replace("{version}", res.mongo_version);
+      } else {
+        resBox.className = "conn-test-result error";
+        resBox.textContent = `${res.error.message} ${res.error.hint || ""}`.trim();
+      }
+    };
+
+    $("#conn-btn-change").onclick = () => {
+      // Prefill with current values — but uri_redacted has "<redacted>", so blank instead.
+      $("#conn-form-change-uri").value = state.uri_redacted.includes("<redacted>") ? "" : state.uri_redacted;
+      $("#conn-form-change-db").value = state.database;
+      $("#conn-form-change").hidden = false;
+    };
+
+    $("#conn-form-change-cancel").onclick = () => {
+      $("#conn-form-change").hidden = true;
+    };
+
+    const changeForm = $("#conn-form-change");
+    const changeErr = $("#conn-form-change-error");
+    changeForm.onsubmit = async (e) => {
+      e.preventDefault();
+      changeErr.hidden = true;
+      const uri = $("#conn-form-change-uri").value.trim();
+      const database = $("#conn-form-change-db").value.trim();
+      let res;
+      try { res = await fetchJson("POST", "/api/connection/save", { uri, database }); }
+      catch (err) { res = { ok: false, error: { code: "http_error", message: String(err), hint: "", details: "" } }; }
+      if (!res.ok) { showConnError(changeErr, res.error); return; }
+      sessionStorage.setItem("msem.connection.pending", "1");
+      showSavedBanner(CONTENT.connection.banner_restart_required_save);
+      renderConnectionPage();
+    };
+
+    $("#conn-btn-disconnect").onclick = async () => {
+      if (!confirm(c.disconnect_confirm_body)) return;
+      let res;
+      try { res = await fetchJson("DELETE", "/api/connection"); }
+      catch (err) { toast("Disconnect failed: " + err.message); return; }
+      if (res.ok) {
+        sessionStorage.setItem("msem.connection.pending", "1");
+        showSavedBanner(c.banner_restart_required_disconnect);
+        renderConnectionPage();
+      }
+    };
+  }
+
+  function showConnError(box, err) {
+    box.hidden = false;
+    box.innerHTML = `<strong>${escapeHtml(err.message)}</strong>` +
+      (err.hint ? `<br>${escapeHtml(err.hint)}` : "") +
+      (err.details ? `<details><summary>Show technical details</summary><code>${escapeHtml(err.details)}</code></details>` : "");
+  }
+
+  function showSavedBanner(message) {
+    const b = $("#conn-banner-saved");
+    b.textContent = message;
+    b.hidden = false;
+  }
+
+  function setNavDisabled(disabled) {
+    const tooltip = CONTENT.connection.nav_disabled_tooltip;
+    $$("#app-nav a").forEach(a => {
+      const page = a.dataset.page;
+      if (page === "connection") return;
+      if (disabled) {
+        a.classList.add("nav-disabled");
+        a.setAttribute("aria-disabled", "true");
+        a.setAttribute("title", tooltip);
+      } else {
+        a.classList.remove("nav-disabled");
+        a.removeAttribute("aria-disabled");
+        a.removeAttribute("title");
+      }
+    });
+  }
+
   // ---- guide content -----------------------------------------------------
   const GUIDE_HTML = `
     <h3>1. Connection</h3>
@@ -268,7 +473,7 @@
   };
 
   const handlers = {
-    connection() { },
+    connection() { renderConnectionPage(); },
 
     collections: async () => {
       const tbl = $("#collections-table");
@@ -801,21 +1006,6 @@
       const sb = $("#app-sidebar");
       if (sb && !sb.contains(ev.target) && ev.target !== toggle && !toggle.contains(ev.target)) {
         document.body.classList.remove("sidebar-open");
-      }
-    });
-
-    const cf = $("#form-connection");
-    if (cf) cf.addEventListener("submit", async ev => {
-      ev.preventDefault();
-      const uri = $("#conn-uri").value.trim();
-      const database = $("#conn-db").value.trim();
-      $("#conn-state").textContent = CONTENT.connection.state_connecting;
-      try {
-        const r = await fetchJson("POST", "/api/connect", { uri, database });
-        const stateKey = `state_${r.topology}`;
-        $("#conn-state").textContent = CONTENT.connection[stateKey] || JSON.stringify(r);
-      } catch (e) {
-        $("#conn-state").textContent = e.message;
       }
     });
   })();
