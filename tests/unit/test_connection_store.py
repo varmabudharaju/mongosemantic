@@ -98,3 +98,10 @@ def test_load_partial_returns_none(isolated_home):
     p.write_text(json.dumps({"uri": "mongodb://x"}))  # missing database
     p.chmod(0o600)
     assert load() is None
+
+
+def test_save_overwrite_preserves_0600(isolated_home):
+    save("mongodb+srv://a:b@c.mongodb.net/", "db1")
+    save("mongodb+srv://x:y@z.mongodb.net/", "db2")  # overwrite
+    mode = stat.S_IMODE(config_path().stat().st_mode)
+    assert mode == 0o600

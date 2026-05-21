@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -57,8 +58,19 @@ def save(uri: str, database: str) -> None:
         "database": database,
         "saved_at": datetime.now(timezone.utc).isoformat(),
     }
-    p.write_text(json.dumps(payload, indent=2))
-    p.chmod(0o600)
+    data = json.dumps(payload, indent=2)
+    # Write to a temp file in the same dir, chmod, then atomically replace.
+    # This guarantees the file is 0600 from the moment it has any contents on disk.
+    fd, tmp_name = tempfile.mkstemp(dir=str(p.parent), prefix=".config-", suffix=".json.tmp")
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(data)
+        os.replace(tmp_name, p)
+    except Exception:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp_name)
+        raise
 
 
 def delete() -> None:
