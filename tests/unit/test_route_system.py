@@ -221,3 +221,11 @@ def test_test_connection_returns_error_when_unreachable(monkeypatch, isolated_xd
     body = r.json()
     assert body["ok"] is False
     assert body["error"]["code"] == "timeout"
+
+
+def test_connection_config_path(monkeypatch, isolated_xdg):
+    client = _client_no_env(monkeypatch)
+    r = client.get("/api/connection/config-path")
+    body = r.json()
+    assert body["path"].endswith("mongosemantic/config.json")
+    assert str(isolated_xdg) in body["path"]

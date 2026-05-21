@@ -198,3 +198,8 @@ def test_connection() -> dict:
 def delete_connection() -> dict:
     connection_store.delete()
     return {"ok": True, "restart_required": True}
+
+
+@router.get("/api/connection/config-path")
+def connection_config_path() -> dict:
+    return {"path": str(connection_store.config_path())}
