@@ -1,5 +1,6 @@
 import pytest
 
+from mongosemantic import connection_store
 from mongosemantic.config import Settings
 
 
@@ -36,8 +37,6 @@ def test_settings_validates_model(monkeypatch):
 # ---------------------------------------------------------------------------
 # Task 2: Settings.from_environment() — env var > config file precedence
 # ---------------------------------------------------------------------------
-
-from mongosemantic import connection_store  # noqa: E402
 
 
 @pytest.fixture
@@ -104,3 +103,26 @@ def test_legacy_settings_constructor_still_works(clean_env, isolated_xdg):
     s = Settings()
     assert s.uri == "mongodb://env-host/"
     assert s.source == "env"
+
+
+def test_partial_env_uri_only_raises(clean_env, isolated_xdg):
+    clean_env.setenv("MONGOSEMANTIC_URI", "mongodb://x/")
+    # MONGOSEMANTIC_DB intentionally unset
+    with pytest.raises(ValueError, match="MONGOSEMANTIC_DB"):
+        Settings.from_environment()
+
+
+def test_partial_env_db_only_raises(clean_env, isolated_xdg):
+    clean_env.setenv("MONGOSEMANTIC_DB", "mydb")
+    # MONGOSEMANTIC_URI intentionally unset
+    with pytest.raises(ValueError, match="MONGOSEMANTIC_URI"):
+        Settings.from_environment()
+
+
+def test_partial_env_does_not_silently_use_file(clean_env, isolated_xdg):
+    # Even if a file is saved, a partial env var must raise — not mix sources.
+    connection_store.save("mongodb://file-host/", "file_db")
+    clean_env.setenv("MONGOSEMANTIC_URI", "mongodb://env-host/")
+    # MONGOSEMANTIC_DB intentionally unset
+    with pytest.raises(ValueError):
+        Settings.from_environment()

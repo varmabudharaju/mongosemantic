@@ -65,15 +65,28 @@ class Settings:
         """
         env_uri = os.environ.get("MONGOSEMANTIC_URI", "")
         env_db = os.environ.get("MONGOSEMANTIC_DB", "")
-        if env_uri and env_db:
+        if env_uri or env_db:
+            # Partial env-mode is an error — don't silently mix sources.
+            if not env_uri:
+                raise ValueError(
+                    "MONGOSEMANTIC_DB is set but MONGOSEMANTIC_URI is not. "
+                    "Set both or unset both."
+                )
+            if not env_db:
+                raise ValueError(
+                    "MONGOSEMANTIC_URI is set but MONGOSEMANTIC_DB is not. "
+                    "Set both or unset both."
+                )
             return cls(uri=env_uri, database=env_db, source="env")
 
         saved = connection_store.load()
         if saved is not None:
             return cls(uri=saved.uri, database=saved.database, source="file")
 
-        # Fall through: rely on Settings() to raise the canonical error.
-        return cls()  # source defaults to "env"; will raise in __post_init__
+        # Neither env nor file — let Settings() raise its canonical error.
+        # We don't construct with source="none" because __post_init__ will reject
+        # the empty uri before any field is observed; but be explicit anyway.
+        return cls(source="none")
 
     @classmethod
     def try_from_environment(cls) -> Settings | None:
