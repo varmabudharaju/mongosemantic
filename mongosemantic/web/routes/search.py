@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from datetime import date, datetime
+from decimal import Decimal
+from uuid import UUID
+
+from bson import ObjectId
 from fastapi import APIRouter, HTTPException, Query
 
 from mongosemantic.commands.search import _run_one, hybrid_available, run_one_hybrid
@@ -12,20 +17,42 @@ from mongosemantic.web.identifiers import IdentifierError, validate_identifier
 
 router = APIRouter()
 
+# Common BSON / Python scalars that pydantic v2 either chokes on or serializes
+# inconsistently across versions. We stringify these so the UI gets a useful
+# value rather than a silent drop (e.g. `released` datetime, `imdb.rating`
+# Decimal128, nested ObjectId in `cast` for collections that store refs).
+_STRINGIFY_TYPES = (datetime, date, UUID, Decimal, ObjectId)
 
-def _is_json_safe(v: object) -> bool:
-    """A value is JSON-safe (after the explicit ObjectId stringification
-    below) iff it's a primitive, a list/tuple of safe values, or a dict
-    with string keys and safe values. Anything else — notably `bytes`,
-    `bson.binary.Binary`, raw `ObjectId` in nested fields — would either
-    crash pydantic v2 with UnicodeDecodeError or serialize as garbage."""
+
+def _safe(v: object) -> object | None:
+    """Recursively convert a value to something JSON-safe.
+
+    - Primitives (None, str, int, float, bool) pass through.
+    - Common BSON / Python scalars (datetime, Decimal, UUID, ObjectId) get
+      stringified.
+    - Lists/tuples are recursed; opaque elements drop out.
+    - Dicts (string keys only) are recursed; opaque values drop out.
+    - Anything else — notably `bytes` and `bson.binary.Binary` (Atlas's
+      pre-computed `plot_embedding` blobs are 6+ KB of these) — returns
+      None and the caller drops the field. Pydantic v2 would otherwise
+      raise UnicodeDecodeError mid-encoding.
+    """
     if v is None or isinstance(v, (str, int, float, bool)):
-        return True
+        return v
+    if isinstance(v, _STRINGIFY_TYPES):
+        return str(v)
     if isinstance(v, (list, tuple)):
-        return all(_is_json_safe(x) for x in v)
+        return [s for s in (_safe(x) for x in v) if s is not None]
     if isinstance(v, dict):
-        return all(isinstance(k, str) and _is_json_safe(x) for k, x in v.items())
-    return False
+        out: dict = {}
+        for k, x in v.items():
+            if not isinstance(k, str):
+                continue
+            s = _safe(x)
+            if s is not None:
+                out[k] = s
+        return out
+    return None  # opaque (bytes, Binary, custom classes) -> drop
 
 
 def _serialize(row: dict) -> dict:
@@ -37,19 +64,16 @@ def _serialize(row: dict) -> dict:
     src = row.get("source_doc")
     if isinstance(src, dict):
         # Keep user-visible fields and `_id`; drop other underscore-prefixed
-        # internals AND anything that isn't JSON-safe (e.g. BSON Binary
-        # `plot_embedding` from Atlas sample data — pydantic v2 raises
-        # UnicodeDecodeError on raw bytes during JSON encoding).
+        # internals. Run every kept value through _safe so BSON blobs
+        # (e.g. plot_embedding) don't crash pydantic and useful BSON
+        # scalars (datetime, Decimal128) survive as strings.
         clean: dict = {}
         for k, v in src.items():
             if k.startswith("_") and k != "_id":
                 continue
-            if k == "_id":
-                clean[k] = str(v)
-            elif _is_json_safe(v):
-                clean[k] = v
-            # else: silently drop — binary blobs, raw ObjectIds in nested
-            # fields, datetimes (handled separately by pydantic), etc.
+            safe_v = _safe(v)
+            if safe_v is not None:
+                clean[k] = safe_v
         out["source_doc"] = clean
     if "source_id" in out:
         out["source_id"] = str(out["source_id"])
