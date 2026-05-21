@@ -817,3 +817,113 @@ pre#query-results {
   #search-results > li { grid-template-columns: 1fr; }
   #search-results strong { width: max-content; }
 }
+
+/* ===== Connection page ================================================ */
+
+.banner {
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+.banner-info    { background: #e8f4fd; color: #0b6cb1; border-left: 4px solid #1976d2; }
+.banner-success { background: #e8f5e9; color: #13632b; border-left: 4px solid #13aa52; }
+.banner-warning { background: #fff8e1; color: #6a4f00; border-left: 4px solid #f9a825; }
+
+.conn-hero {
+  text-align: center;
+  padding: 24px;
+  background: #f4f7f8;
+  border-radius: 8px;
+  margin-bottom: 24px;
+}
+.conn-hero h3 { margin: 0 0 8px; }
+.conn-hero p  { margin: 0; color: var(--mdb-ink-muted); }
+
+.conn-status-card {
+  background: #fff;
+  border: 1px solid var(--mdb-line);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 24px;
+  position: relative;
+}
+.conn-status-dot {
+  position: absolute;
+  top: 22px; right: 20px;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: #13aa52;
+}
+.conn-status-card h3 { margin: 0 0 16px; font-size: 18px; }
+.conn-status-card dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 0;
+}
+.conn-status-card dt { color: var(--mdb-ink-muted); font-size: 13px; }
+.conn-status-card dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.conn-actions {
+  margin-top: 20px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.conn-actions button.btn-danger {
+  background: #fff;
+  color: #c0392b;
+  border: 1px solid #c0392b;
+}
+
+.conn-test-result {
+  margin-top: 14px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.conn-test-result.success { background: #e8f5e9; color: #13632b; }
+.conn-test-result.error   { background: #fdecea; color: #c0392b; }
+
+.conn-error {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid #c0392b;
+  border-radius: 6px;
+  background: #fdecea;
+  color: #c0392b;
+  font-size: 13px;
+}
+.conn-error details { margin-top: 8px; }
+.conn-error details code { display: block; padding: 8px; background: #fff; border-radius: 4px; }
+
+.conn-devhelp {
+  margin-top: 32px;
+}
+.conn-devhelp-section-title {
+  margin: 12px 0 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--mdb-ink-muted);
+}
+.conn-devhelp dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+.conn-devhelp dd { margin: 0; }
+.conn-devhelp dd.env-set   { color: #13632b; }
+.conn-devhelp dd.env-unset { color: var(--mdb-ink-muted); }
+
+#app-nav a.nav-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+  cursor: not-allowed;
+}
