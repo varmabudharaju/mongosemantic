@@ -13,6 +13,21 @@ from mongosemantic.web.identifiers import IdentifierError, validate_identifier
 router = APIRouter()
 
 
+def _is_json_safe(v: object) -> bool:
+    """A value is JSON-safe (after the explicit ObjectId stringification
+    below) iff it's a primitive, a list/tuple of safe values, or a dict
+    with string keys and safe values. Anything else — notably `bytes`,
+    `bson.binary.Binary`, raw `ObjectId` in nested fields — would either
+    crash pydantic v2 with UnicodeDecodeError or serialize as garbage."""
+    if v is None or isinstance(v, (str, int, float, bool)):
+        return True
+    if isinstance(v, (list, tuple)):
+        return all(_is_json_safe(x) for x in v)
+    if isinstance(v, dict):
+        return all(isinstance(k, str) and _is_json_safe(x) for k, x in v.items())
+    return False
+
+
 def _serialize(row: dict) -> dict:
     out = {
         k: row[k]
@@ -21,9 +36,20 @@ def _serialize(row: dict) -> dict:
     }
     src = row.get("source_doc")
     if isinstance(src, dict):
-        clean = {k: v for k, v in src.items() if not k.startswith("_") or k == "_id"}
-        if "_id" in clean:
-            clean["_id"] = str(clean["_id"])
+        # Keep user-visible fields and `_id`; drop other underscore-prefixed
+        # internals AND anything that isn't JSON-safe (e.g. BSON Binary
+        # `plot_embedding` from Atlas sample data — pydantic v2 raises
+        # UnicodeDecodeError on raw bytes during JSON encoding).
+        clean: dict = {}
+        for k, v in src.items():
+            if k.startswith("_") and k != "_id":
+                continue
+            if k == "_id":
+                clean[k] = str(v)
+            elif _is_json_safe(v):
+                clean[k] = v
+            # else: silently drop — binary blobs, raw ObjectIds in nested
+            # fields, datetimes (handled separately by pydantic), etc.
         out["source_doc"] = clean
     if "source_id" in out:
         out["source_id"] = str(out["source_id"])
