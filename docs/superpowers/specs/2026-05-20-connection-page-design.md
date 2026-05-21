@@ -145,7 +145,7 @@ All under `mongosemantic/web/routes/system.py`. Existing `POST /api/connect` is 
 ## File layout
 
 **New backend modules**:
-- `mongosemantic/config_store.py` — pure `load() / save(uri, database) / delete() / config_path()`. Handles XDG, dir creation, chmod. Fully unit-testable.
+- `mongosemantic/connection_store.py` — pure `load() / save(uri, database) / delete() / config_path()`. Handles XDG, dir creation, chmod. Fully unit-testable. (Note: distinct from existing `mongosemantic/state/config_store.py`, which is per-collection semantic-search config in MongoDB.)
 - `mongosemantic/web/connection_errors.py` — `map_exception(exc) -> ConnectionError` + Pydantic models for the JSON shape.
 
 **Changed backend modules**:
@@ -164,7 +164,7 @@ All under `mongosemantic/web/routes/system.py`. Existing `POST /api/connect` is 
 
 **Unit tests** (`tests/unit/`):
 
-- `test_config_store.py`:
+- `test_connection_store.py`:
   - Write a config; read it back; assert `0600` permissions.
   - `$XDG_CONFIG_HOME` override is honored.
   - `delete()` removes the file and is idempotent.
