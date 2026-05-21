@@ -29,7 +29,7 @@ def _process_all_pending(db, provider, batch_size: int) -> int:
 
 
 def run_worker(poll_interval: int, batch_size: int, once: bool = False) -> None:
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     db = conn.db
     ensure_indexes(db)

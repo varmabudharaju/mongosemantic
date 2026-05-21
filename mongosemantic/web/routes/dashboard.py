@@ -24,7 +24,7 @@ router = APIRouter()
 
 @router.get("/api/dashboard")
 def dashboard() -> dict:
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
         db = conn.db
@@ -80,7 +80,7 @@ def dashboard() -> dict:
 
 @router.get("/api/jobs/status")
 def jobs_status() -> dict:
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
         return {"jobs": count_by_status(conn.db)}
@@ -90,7 +90,7 @@ def jobs_status() -> dict:
 
 @router.post("/api/jobs/retry")
 def retry_failed() -> dict:
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
         n = reset_failed(conn.db)
@@ -116,7 +116,7 @@ def teardown(name: str, req: TeardownRequest | None = None) -> dict:
         validate_identifier(name)
     except IdentifierError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
         db = conn.db
@@ -143,7 +143,7 @@ def reindex(req: ReindexRequest) -> dict:
         validate_identifier(req.collection)
     except IdentifierError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
         db = conn.db

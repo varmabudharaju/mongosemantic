@@ -53,7 +53,7 @@ def apply(name: str = Path(...), req: ApplyRequest = ...) -> dict:
             detail="Chunked embeddings require shadow mode. Switch mode to shadow or turn off chunking.",
         )
 
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
         db = conn.db

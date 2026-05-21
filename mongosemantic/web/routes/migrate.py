@@ -26,7 +26,7 @@ class MigrateRequest(BaseModel):
 def _run_migration(collection: str, model: str, drop_archive: bool) -> None:
     """Background-thread entry point. Opens its own connection so it doesn't
     fight the request-thread's connection lifecycle."""
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
         try:
