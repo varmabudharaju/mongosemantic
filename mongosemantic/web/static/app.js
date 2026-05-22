@@ -142,9 +142,28 @@
       $("#conn-btn-disconnect").hidden = false;
     }
 
-    if (sessionStorage.getItem("msem.connection.pending")) {
+    // Remember the server's startup time so save/disconnect handlers can stamp
+    // the pending flag with it.
+    _lastServerStartedAt = stateRes.server_started_at || 0;
+
+    // Pending-restart banner: stamp on save/disconnect with the server's
+    // startup timestamp at that moment. If the server has since restarted
+    // (current server_started_at is greater), clear the flag.
+    const pendingAt = parseInt(sessionStorage.getItem("msem.connection.pending") || "0", 10);
+    if (pendingAt && _lastServerStartedAt > pendingAt) {
+      sessionStorage.removeItem("msem.connection.pending");
+    } else if (pendingAt) {
       $("#conn-banner-pending").hidden = false;
     }
+  }
+
+  let _lastServerStartedAt = 0;
+  function markPendingRestart() {
+    // Use the server-startup time we last saw, not Date.now(): clocks
+    // disagree, but the server's own timestamp is what we'll compare against
+    // on the next page load. Fallback to Date.now() if it's not yet known.
+    const stamp = _lastServerStartedAt || Math.floor(Date.now() / 1000);
+    sessionStorage.setItem("msem.connection.pending", String(stamp));
   }
 
   function renderConnStatusCard(state) {
@@ -281,7 +300,7 @@
       try { res = await fetchJson("POST", "/api/connection/save", { uri, database }); }
       catch (err) { res = { ok: false, error: { code: "http_error", message: String(err), hint: "", details: "" } }; }
       if (!res.ok) { showConnError(errBox, res.error); return; }
-      sessionStorage.setItem("msem.connection.pending", "1");
+      markPendingRestart();
       showSavedBanner(CONTENT.connection.banner_restart_required_save);
       renderConnectionPage();
     };
@@ -339,7 +358,7 @@
       try { res = await fetchJson("POST", "/api/connection/save", { uri, database }); }
       catch (err) { res = { ok: false, error: { code: "http_error", message: String(err), hint: "", details: "" } }; }
       if (!res.ok) { showConnError(changeErr, res.error); return; }
-      sessionStorage.setItem("msem.connection.pending", "1");
+      markPendingRestart();
       showSavedBanner(CONTENT.connection.banner_restart_required_save);
       renderConnectionPage();
     };
@@ -350,7 +369,7 @@
       try { res = await fetchJson("DELETE", "/api/connection"); }
       catch (err) { toast("Disconnect failed: " + err.message); return; }
       if (res.ok) {
-        sessionStorage.setItem("msem.connection.pending", "1");
+        markPendingRestart();
         showSavedBanner(c.banner_restart_required_disconnect);
         renderConnectionPage();
       }
