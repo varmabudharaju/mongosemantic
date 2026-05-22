@@ -207,49 +207,76 @@
     return sel;
   }
 
-  // Wire URI blur on a form to call /api/connection/list-databases.
-  // On success: morph the DB text input into a <select> of real db names.
-  // On failure: surface the error inline so the user knows what happened.
-  // While in flight: show a "Checking databases…" hint next to the DB field.
+  // Fire /api/connection/list-databases for a given URI and update the hint
+  // + morph the DB input into a <select>. Returns true on success.
+  async function tryPopulateDatabases(uri, dbId, hint) {
+    if (!uri.startsWith("mongodb://") && !uri.startsWith("mongodb+srv://")) {
+      if (hint) { hint.hidden = false; hint.className = "conn-hint error"; hint.textContent = "URI must start with mongodb:// or mongodb+srv://"; }
+      return false;
+    }
+    if (hint) { hint.hidden = false; hint.className = "conn-hint info"; hint.textContent = "Checking databases…"; }
+    let res;
+    try { res = await fetchJson("POST", "/api/connection/list-databases", { uri }); }
+    catch (err) {
+      if (hint) { hint.className = "conn-hint error"; hint.textContent = "Couldn't reach cluster: " + err.message; }
+      return false;
+    }
+    if (!res.ok) {
+      if (hint) { hint.className = "conn-hint error"; hint.textContent = `${res.error.message} ${res.error.hint || ""}`.trim(); }
+      return false;
+    }
+    if (!Array.isArray(res.databases) || res.databases.length === 0) {
+      if (hint) { hint.className = "conn-hint info"; hint.textContent = "Connected, but no user-visible databases yet — type one to create it on first write."; }
+      return false;
+    }
+    morphDbInputToSelect(dbId, res.databases, res.default);
+    if (hint) { hint.className = "conn-hint success"; hint.textContent = `Pick one of ${res.databases.length} database${res.databases.length === 1 ? "" : "s"}.`; }
+    return true;
+  }
+
+  // Wire URI input -> debounced auto-populate, with blur as a fast-path.
+  // Listens on both events because (a) "input" fires on paste, (b) "blur"
+  // catches the case where the user pastes via right-click without keystrokes.
   function wireUriBlurPopulator(uriId, dbId, hintId) {
     const uriInput = document.getElementById(uriId);
     if (!uriInput) return;
     const hint = hintId && document.getElementById(hintId);
     let lastUri = "";
-    uriInput.addEventListener("blur", async () => {
-      const uri = uriInput.value.trim();
+    let timer = null;
+    const trigger = (uri) => {
       if (!uri || uri === lastUri) return;
-      if (!uri.startsWith("mongodb://") && !uri.startsWith("mongodb+srv://")) return;
       lastUri = uri;
-      if (hint) { hint.hidden = false; hint.className = "conn-hint info"; hint.textContent = "Checking databases…"; }
-      let res;
-      try { res = await fetchJson("POST", "/api/connection/list-databases", { uri }); }
-      catch (err) {
-        if (hint) { hint.className = "conn-hint error"; hint.textContent = "Couldn't reach cluster: " + err.message; }
-        return;
-      }
-      if (!res.ok) {
-        if (hint) { hint.className = "conn-hint error"; hint.textContent = `${res.error.message} ${res.error.hint || ""}`.trim(); }
-        return;
-      }
-      if (!Array.isArray(res.databases) || res.databases.length === 0) {
-        if (hint) { hint.className = "conn-hint info"; hint.textContent = "Connected, but no user-visible databases yet — type one to create it on first write."; }
-        return;
-      }
-      morphDbInputToSelect(dbId, res.databases, res.default);
-      if (hint) { hint.className = "conn-hint success"; hint.textContent = `Pick one of ${res.databases.length} database${res.databases.length === 1 ? "" : "s"}.`; }
+      tryPopulateDatabases(uri, dbId, hint);
+    };
+    uriInput.addEventListener("input", () => {
+      const uri = uriInput.value.trim();
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => trigger(uri), 600);
+    });
+    uriInput.addEventListener("blur", () => {
+      if (timer) { clearTimeout(timer); timer = null; }
+      trigger(uriInput.value.trim());
     });
   }
 
   function wireConnNewForm() {
     const form = $("#conn-form-new");
     const errBox = $("#conn-form-new-error");
+    const hint = $("#conn-form-new-hint");
     wireUriBlurPopulator("conn-form-new-uri", "conn-form-new-db", "conn-form-new-hint");
     form.onsubmit = async (e) => {
       e.preventDefault();
       errBox.hidden = true;
       const uri = $("#conn-form-new-uri").value.trim();
       const database = $("#conn-form-new-db").value.trim();
+      // If the user hit Connect without picking a database, try to list them
+      // first instead of failing with a "database required" error. This
+      // catches users who pasted+clicked-Connect with no blur in between.
+      if (uri && !database) {
+        const populated = await tryPopulateDatabases(uri, "conn-form-new-db", hint);
+        if (populated) return;  // user must now pick from the dropdown
+        // population failed; fall through and let the server send the friendly error
+      }
       let res;
       try { res = await fetchJson("POST", "/api/connection/save", { uri, database }); }
       catch (err) { res = { ok: false, error: { code: "http_error", message: String(err), hint: "", details: "" } }; }
