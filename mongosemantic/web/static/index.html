@@ -173,19 +173,23 @@
       <aside class="page-help">
         <strong>How to use</strong>
         <ol>
-          <li>Each row is a field path mongosemantic discovered when sampling this collection.</li>
-          <li>Look for fields rated <em>Great</em> or <em>Good</em> — those are rich text fields worth embedding.</li>
-          <li>Click <em>Configure semantic search</em> below the table to apply.</li>
+          <li>Browse a few sample documents below to see what's in this collection.</li>
+          <li>The table scores every field for semantic-search suitability — look for <em>Great</em> or <em>Good</em>.</li>
+          <li>Click <em>Configure semantic search</em> to pick which fields to embed.</li>
         </ol>
         <span class="try-line"><strong>Bands:</strong> Great = long, varied text. Good = usable. Usable = short/sparse, combine with another field. Not recommended = IDs, numerics, dates.</span>
       </aside>
+
+      <h3 class="inspect-section-title">Sample documents</h3>
+      <p class="inspect-section-hint">A few random docs so you can see the shape of the data before configuring.</p>
+      <div id="inspect-sample"></div>
+
+      <h3 class="inspect-section-title">Field analysis</h3>
       <div class="table-wrap"><table id="inspect-table"></table></div>
+
       <p style="margin-top:24px">
-        <a id="inspect-apply-link" class="cta-link" href="#/apply/">Configure semantic search →</a>
+        <a id="inspect-apply-link" class="cta-button" href="#/apply/">Configure semantic search</a>
       </p>
-      <h3 style="margin-top:32px">Sample documents</h3>
-      <p style="color:var(--mdb-ink-muted);font-size:13px;margin-bottom:8px">A few random docs so you can see the shape of the data before configuring.</p>
-      <pre id="inspect-sample" style="background:#F4F7F8;border:1px solid var(--mdb-line);padding:16px;border-radius:8px;font-size:12px;line-height:1.5;overflow:auto;max-height:400px;font-family:var(--font-mono)"></pre>
     </section>
 
     <section id="page-apply" hidden>
