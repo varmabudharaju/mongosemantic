@@ -19,10 +19,6 @@ from mongosemantic.web.connection_errors import (
 
 router = APIRouter()
 
-# Captured once at module import. The client uses this to expire stale
-# sessionStorage "pending restart" flags after an actual restart.
-_SERVER_STARTED_AT = int(time.time())
-
 
 # -- Existing endpoint kept for backward compatibility --
 
@@ -117,7 +113,6 @@ def get_connection() -> dict:
             "model": os.environ.get("MONGOSEMANTIC_MODEL", "local-fast"),
             "configured_count": 0,
             "env_overrides": env_overrides,
-            "server_started_at": _SERVER_STARTED_AT,
         }
 
     state: Literal["connected_ui", "connected_env"] = (
@@ -138,7 +133,6 @@ def get_connection() -> dict:
             "configured_count": 0,
             "env_overrides": env_overrides,
             "warning": {"code": err.code, "message": err.message, "hint": err.hint},
-            "server_started_at": _SERVER_STARTED_AT,
         }
 
     try:
@@ -153,7 +147,6 @@ def get_connection() -> dict:
             "model": settings.model,
             "configured_count": configured_count,
             "env_overrides": env_overrides,
-            "server_started_at": _SERVER_STARTED_AT,
         }
     finally:
         conn.close()
@@ -184,7 +177,6 @@ def save_connection(req: SaveRequest) -> dict:
         "ok": True,
         "topology": topology,
         "mongo_version": mongo_version,
-        "restart_required": True,
     }
 
 
@@ -221,7 +213,7 @@ def test_connection() -> dict:
 @router.delete("/api/connection")
 def delete_connection() -> dict:
     connection_store.delete()
-    return {"ok": True, "restart_required": True}
+    return {"ok": True}
 
 
 @router.get("/api/connection/config-path")
