@@ -17,6 +17,7 @@ htmlcov/
 # session-scratch handoff files for resuming work in a new chat window
 _session-handoff.md
 .claude/
+.superpowers/
 
 # Atlas credentials — local-only env file for the verification suite.
 # Contains MONGOSEMANTIC_ATLAS_URI with an embedded password. NEVER commit.

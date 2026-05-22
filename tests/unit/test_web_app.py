@@ -24,4 +24,4 @@ def test_content_endpoint_returns_full_dict(monkeypatch):
     data = r.json()
     assert "connection" in data
     assert "global" in data
-    assert data["connection"]["title"] == "Connect to MongoDB"
+    assert data["connection"]["title"] == "Connection"

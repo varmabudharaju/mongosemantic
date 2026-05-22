@@ -200,6 +200,26 @@ the regression-test step is best-effort — for visual/JS bugs a unit
 test against the API layer is preferred; if none is feasible, the PR
 notes that explicitly rather than skipping the test step silently.
 
+### Tier 8 — Connection page: save, test, error mapping, disconnect
+
+End-to-end API exercise of the connection page against a real Atlas
+URI: initial not-connected state, save + topology probe, GET reflects
+saved config, `/api/connection/test` pings active connection, wrong-
+password save returns a mapped error code without writing config, and
+DELETE clears the stored connection. Codified as
+`test_t8_connection_page.py`.
+
+| Tier | Description | Status |
+|---|---|---|
+| 1 | smoke — connect, apply, index, search | (status) |
+| 2 | vector + multi-field `$vectorSearch` | (status) |
+| 3 | `$search` BM25 | (status) |
+| 4 | `$rankFusion` hybrid (8.1+ / 8.0 fallback) | (status) |
+| 5 | chunked + inline | (status) |
+| 6 | migration carry-over | (status) |
+| 7 | UI smoke (manual) | (status) |
+| 8 | connection page — save, test, error mapping, disconnect | (status) |
+
 ## Per-bug PR workflow
 
 Triggered when any tier surfaces a defect. Each fix gets its own

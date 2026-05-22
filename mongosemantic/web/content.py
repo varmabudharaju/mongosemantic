@@ -8,21 +8,73 @@ from __future__ import annotations
 
 CONTENT: dict[str, dict[str, str]] = {
     "connection": {
-        "title": "Connect to MongoDB",
-        "subtitle": "Paste a connection string. We'll detect your deployment and set things up from there.",
-        "uri_label": "Connection URI",
-        "uri_placeholder": "mongodb+srv://user:pass@cluster.mongodb.net/your_db",
+        # Page chrome
+        "title": "Connection",
+        "subtitle_disconnected": "Connect mongosemantic to a MongoDB database to get started.",
+        "subtitle_connected_ui": "mongosemantic is connected to the database below.",
+        "subtitle_connected_env": "mongosemantic is connected via the MONGOSEMANTIC_URI environment variable.",
+
+        # First-run hero
+        "hero_title": "Not connected yet",
+        "hero_body": "Paste a MongoDB URI below to get started.",
+
+        # Form
+        "uri_label": "MongoDB URI",
+        "uri_placeholder": "mongodb+srv://user:pass@cluster.mongodb.net/",
         "db_label": "Database",
-        "db_helper": "Leave blank to use the database in the URI.",
+        "db_placeholder": "e.g. sample_mflix",
+        "connect_button": "Connect",
+        "save_button": "Save & require restart",
+        "cancel_button": "Cancel",
+
+        # Connected state
+        "status_label_uri": "URI",
+        "status_label_database": "Database",
+        "status_label_topology": "Topology",
+        "status_label_mongo_version": "MongoDB",
+        "status_label_model": "Embedding model",
+        "status_label_configured": "Collections configured",
         "test_button": "Test connection",
-        "footer_note": "Your connection string is stored in .env with chmod 600. It's never sent to the browser.",
-        "state_connecting": "Testing connection…",
-        "state_atlas": 'Connected to Atlas cluster "{name}" — native $vectorSearch available.',
-        "state_replica": 'Connected to replica set "{name}" — change streams enabled, brute-force search until $vectorSearch is configured.',
-        "state_standalone": "Connected to standalone MongoDB — polling mode will be used (check collection has an updated_at field for best results).",
-        "error_auth": "Authentication failed. Check username, password, and that your IP is allowed in Atlas > Network Access.",
-        "error_network": "Couldn't reach that host. Check the URI and try again.",
-        "error_version": "MongoDB {version} is below the minimum supported version (7.0). Please upgrade or use a newer cluster.",
+        "change_button": "Change connection",
+        "disconnect_button": "Disconnect",
+        "disconnect_confirm_title": "Disconnect?",
+        "disconnect_confirm_body": (
+            "This removes the saved connection. mongosemantic will return to "
+            "the \"Not connected\" state on next launch."
+        ),
+        "disconnect_confirm_ok": "Disconnect",
+
+        # Banners
+        "banner_env_override": (
+            "Running from MONGOSEMANTIC_URI environment variable. To make "
+            "changes, edit the env var and restart, or unset it and use this page."
+        ),
+        "banner_restart_required_save": (
+            "Saved. Restart mongosemantic ui (and mongosemantic worker if you "
+            "have one running) to start using this connection."
+        ),
+        "banner_restart_required_disconnect": (
+            "Disconnected. Restart mongosemantic ui to return to first-run state."
+        ),
+        "banner_pending_restart": "Pending restart — current session still uses the old connection.",
+
+        # Test result
+        "test_success": "Connection alive — {latency_ms} ms · MongoDB {version}",
+        "test_running": "Testing…",
+
+        # Dev help
+        "devhelp_title": "Help",
+        "devhelp_env_state_title": "Environment variables",
+        "devhelp_env_yes": "set",
+        "devhelp_env_no": "not set",
+        "devhelp_config_path_title": "Config file",
+        "devhelp_quickref_title": "Quick reference",
+        "devhelp_quickref_format": "URI format: mongodb+srv://user:pass@cluster.mongodb.net/",
+        "devhelp_quickref_atlas": "Atlas: Network Access → add your IP; Database Access → user needs read on the database.",
+        "devhelp_quickref_restart": "After saving, restart mongosemantic ui (and worker if running).",
+
+        # Disabled-nav tooltip
+        "nav_disabled_tooltip": "Connect to a database first.",
     },
     "collections": {
         "title": "Collections",

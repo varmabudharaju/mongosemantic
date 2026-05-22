@@ -89,6 +89,304 @@
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 
+  // ---- connection page state machine + actions ---------------------------
+
+  async function renderConnectionPage() {
+    // Hide all sub-blocks; the fetch will reveal the right one.
+    $("#conn-state-disconnected").hidden = true;
+    $("#conn-state-connected").hidden = true;
+    $("#conn-banner-env").hidden = true;
+    $("#conn-banner-saved").hidden = true;
+    $("#conn-banner-pending").hidden = true;
+
+    let stateRes, pathRes;
+    try {
+      [stateRes, pathRes] = await Promise.all([
+        fetchJson("GET", "/api/connection"),
+        fetchJson("GET", "/api/connection/config-path"),
+      ]);
+    } catch (e) {
+      toast("Failed to load connection state: " + e.message);
+      return;
+    }
+
+    const subtitleKeys = {
+      not_connected: "subtitle_disconnected",
+      connected_ui:  "subtitle_connected_ui",
+      connected_env: "subtitle_connected_env",
+    };
+    $("#conn-subtitle").textContent =
+      CONTENT.connection[subtitleKeys[stateRes.state] || "subtitle_disconnected"];
+
+    renderConnDevHelp(stateRes.env_overrides, pathRes.path);
+
+    if (stateRes.state === "not_connected") {
+      $("#conn-state-disconnected").hidden = false;
+      wireConnNewForm();
+      setNavDisabled(true);
+      return;
+    }
+
+    setNavDisabled(false);
+
+    $("#conn-state-connected").hidden = false;
+    renderConnStatusCard(stateRes);
+    wireConnConnectedActions(stateRes);
+
+    if (stateRes.state === "connected_env") {
+      $("#conn-banner-env").hidden = false;
+      $("#conn-btn-change").hidden = true;
+      $("#conn-btn-disconnect").hidden = true;
+    } else {
+      $("#conn-btn-change").hidden = false;
+      $("#conn-btn-disconnect").hidden = false;
+    }
+
+    if (sessionStorage.getItem("msem.connection.pending")) {
+      $("#conn-banner-pending").hidden = false;
+    }
+  }
+
+  function renderConnStatusCard(state) {
+    const c = CONTENT.connection;
+    $("#conn-status-title").textContent = `Connected to ${state.database}`;
+    const rows = [
+      [c.status_label_uri, state.uri_redacted],
+      [c.status_label_database, state.database],
+      [c.status_label_topology, state.topology || "—"],
+      [c.status_label_mongo_version, state.mongo_version || "—"],
+      [c.status_label_model, state.model],
+      [c.status_label_configured, String(state.configured_count)],
+    ];
+    const dl = $("#conn-status-rows");
+    dl.innerHTML = "";
+    for (const [k, v] of rows) {
+      const dt = document.createElement("dt"); dt.textContent = k;
+      const dd = document.createElement("dd"); dd.textContent = v;
+      dl.appendChild(dt); dl.appendChild(dd);
+    }
+    // Reset any prior test result.
+    const tr = $("#conn-test-result"); tr.hidden = true; tr.className = "conn-test-result"; tr.textContent = "";
+  }
+
+  function renderConnDevHelp(overrides, configPath) {
+    const c = CONTENT.connection;
+    const envDl = $("#conn-devhelp-env");
+    envDl.innerHTML = "";
+    const labelFor = { uri: "MONGOSEMANTIC_URI", db: "MONGOSEMANTIC_DB", model: "MONGOSEMANTIC_MODEL" };
+    for (const key of ["uri", "db", "model"]) {
+      const dt = document.createElement("dt"); dt.textContent = labelFor[key];
+      const dd = document.createElement("dd");
+      dd.textContent = overrides[key] ? c.devhelp_env_yes : c.devhelp_env_no;
+      dd.className = overrides[key] ? "env-set" : "env-unset";
+      envDl.appendChild(dt); envDl.appendChild(dd);
+    }
+    $("#conn-devhelp-path").textContent = configPath;
+  }
+
+  // Replace a `<input>` element with a `<select>` carrying the same id/name,
+  // populated with the given database names. Returns the new element.
+  function morphDbInputToSelect(inputId, databases, selected) {
+    const old = document.getElementById(inputId);
+    if (!old) return null;
+    if (old.tagName === "SELECT") {
+      // Already a select — just refresh options.
+      old.innerHTML = "";
+    } else {
+      const sel = document.createElement("select");
+      sel.id = old.id; sel.name = old.name;
+      old.replaceWith(sel);
+    }
+    const sel = document.getElementById(inputId);
+    for (const name of databases) {
+      const opt = document.createElement("option");
+      opt.value = name; opt.textContent = name;
+      if (name === selected) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    return sel;
+  }
+
+  // Fire /api/connection/list-databases for a given URI and update the hint
+  // + morph the DB input into a <select>. Returns true on success.
+  async function tryPopulateDatabases(uri, dbId, hint) {
+    if (!uri.startsWith("mongodb://") && !uri.startsWith("mongodb+srv://")) {
+      if (hint) { hint.hidden = false; hint.className = "conn-hint error"; hint.textContent = "URI must start with mongodb:// or mongodb+srv://"; }
+      return false;
+    }
+    if (hint) { hint.hidden = false; hint.className = "conn-hint info"; hint.textContent = "Checking databases…"; }
+    let res;
+    try { res = await fetchJson("POST", "/api/connection/list-databases", { uri }); }
+    catch (err) {
+      if (hint) { hint.className = "conn-hint error"; hint.textContent = "Couldn't reach cluster: " + err.message; }
+      return false;
+    }
+    if (!res.ok) {
+      if (hint) { hint.className = "conn-hint error"; hint.textContent = `${res.error.message} ${res.error.hint || ""}`.trim(); }
+      return false;
+    }
+    if (!Array.isArray(res.databases) || res.databases.length === 0) {
+      if (hint) { hint.className = "conn-hint info"; hint.textContent = "Connected, but no user-visible databases yet — type one to create it on first write."; }
+      return false;
+    }
+    morphDbInputToSelect(dbId, res.databases, res.default);
+    if (hint) { hint.className = "conn-hint success"; hint.textContent = `Pick one of ${res.databases.length} database${res.databases.length === 1 ? "" : "s"}.`; }
+    return true;
+  }
+
+  // Wire URI input -> debounced auto-populate, with blur as a fast-path.
+  // Listens on both events because (a) "input" fires on paste, (b) "blur"
+  // catches the case where the user pastes via right-click without keystrokes.
+  function wireUriBlurPopulator(uriId, dbId, hintId) {
+    const uriInput = document.getElementById(uriId);
+    if (!uriInput) return;
+    const hint = hintId && document.getElementById(hintId);
+    let lastUri = "";
+    let timer = null;
+    const trigger = (uri) => {
+      if (!uri || uri === lastUri) return;
+      lastUri = uri;
+      tryPopulateDatabases(uri, dbId, hint);
+    };
+    uriInput.addEventListener("input", () => {
+      const uri = uriInput.value.trim();
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => trigger(uri), 600);
+    });
+    uriInput.addEventListener("blur", () => {
+      if (timer) { clearTimeout(timer); timer = null; }
+      trigger(uriInput.value.trim());
+    });
+  }
+
+  function wireConnNewForm() {
+    const form = $("#conn-form-new");
+    const errBox = $("#conn-form-new-error");
+    const hint = $("#conn-form-new-hint");
+    wireUriBlurPopulator("conn-form-new-uri", "conn-form-new-db", "conn-form-new-hint");
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      errBox.hidden = true;
+      const uri = $("#conn-form-new-uri").value.trim();
+      const database = $("#conn-form-new-db").value.trim();
+      // If the user hit Connect without picking a database, try to list them
+      // first instead of failing with a "database required" error. This
+      // catches users who pasted+clicked-Connect with no blur in between.
+      if (uri && !database) {
+        const populated = await tryPopulateDatabases(uri, "conn-form-new-db", hint);
+        if (populated) return;  // user must now pick from the dropdown
+        // population failed; fall through and let the server send the friendly error
+      }
+      let res;
+      try { res = await fetchJson("POST", "/api/connection/save", { uri, database }); }
+      catch (err) { res = { ok: false, error: { code: "http_error", message: String(err), hint: "", details: "" } }; }
+      if (!res.ok) { showConnError(errBox, res.error); return; }
+      sessionStorage.setItem("msem.connection.pending", "1");
+      showSavedBanner(CONTENT.connection.banner_restart_required_save);
+      renderConnectionPage();
+    };
+  }
+
+  function wireConnConnectedActions(state) {
+    const c = CONTENT.connection;
+
+    $("#conn-btn-test").onclick = async () => {
+      const resBox = $("#conn-test-result");
+      resBox.hidden = false;
+      resBox.className = "conn-test-result";
+      resBox.textContent = c.test_running;
+      let res;
+      try { res = await fetchJson("POST", "/api/connection/test", {}); }
+      catch (err) { res = { ok: false, error: { code: "http_error", message: String(err), hint: "", details: "" } }; }
+      if (res.ok) {
+        resBox.className = "conn-test-result success";
+        resBox.textContent = c.test_success
+          .replace("{latency_ms}", res.latency_ms)
+          .replace("{version}", res.mongo_version);
+      } else {
+        resBox.className = "conn-test-result error";
+        resBox.textContent = `${res.error.message} ${res.error.hint || ""}`.trim();
+      }
+    };
+
+    $("#conn-btn-change").onclick = () => {
+      // Prefill with current values — but uri_redacted has "<redacted>", so blank instead.
+      $("#conn-form-change-uri").value = state.uri_redacted.includes("<redacted>") ? "" : state.uri_redacted;
+      // Reset DB field to a plain input each time the form opens.
+      const dbEl = $("#conn-form-change-db");
+      if (dbEl.tagName === "SELECT") {
+        const input = document.createElement("input");
+        input.id = dbEl.id; input.name = dbEl.name;
+        dbEl.replaceWith(input);
+      }
+      $("#conn-form-change-db").value = state.database;
+      $("#conn-form-change").hidden = false;
+      wireUriBlurPopulator("conn-form-change-uri", "conn-form-change-db", "conn-form-change-hint");
+    };
+
+    $("#conn-form-change-cancel").onclick = () => {
+      $("#conn-form-change").hidden = true;
+    };
+
+    const changeForm = $("#conn-form-change");
+    const changeErr = $("#conn-form-change-error");
+    changeForm.onsubmit = async (e) => {
+      e.preventDefault();
+      changeErr.hidden = true;
+      const uri = $("#conn-form-change-uri").value.trim();
+      const database = $("#conn-form-change-db").value.trim();
+      let res;
+      try { res = await fetchJson("POST", "/api/connection/save", { uri, database }); }
+      catch (err) { res = { ok: false, error: { code: "http_error", message: String(err), hint: "", details: "" } }; }
+      if (!res.ok) { showConnError(changeErr, res.error); return; }
+      sessionStorage.setItem("msem.connection.pending", "1");
+      showSavedBanner(CONTENT.connection.banner_restart_required_save);
+      renderConnectionPage();
+    };
+
+    $("#conn-btn-disconnect").onclick = async () => {
+      if (!confirm(c.disconnect_confirm_body)) return;
+      let res;
+      try { res = await fetchJson("DELETE", "/api/connection"); }
+      catch (err) { toast("Disconnect failed: " + err.message); return; }
+      if (res.ok) {
+        sessionStorage.setItem("msem.connection.pending", "1");
+        showSavedBanner(c.banner_restart_required_disconnect);
+        renderConnectionPage();
+      }
+    };
+  }
+
+  function showConnError(box, err) {
+    box.hidden = false;
+    box.innerHTML = `<strong>${escapeHtml(err.message)}</strong>` +
+      (err.hint ? `<br>${escapeHtml(err.hint)}` : "") +
+      (err.details ? `<details><summary>Show technical details</summary><code>${escapeHtml(err.details)}</code></details>` : "");
+  }
+
+  function showSavedBanner(message) {
+    const b = $("#conn-banner-saved");
+    b.textContent = message;
+    b.hidden = false;
+  }
+
+  function setNavDisabled(disabled) {
+    const tooltip = CONTENT.connection.nav_disabled_tooltip;
+    $$("#app-nav a").forEach(a => {
+      const page = a.dataset.page;
+      if (page === "connection") return;
+      if (disabled) {
+        a.classList.add("nav-disabled");
+        a.setAttribute("aria-disabled", "true");
+        a.setAttribute("title", tooltip);
+      } else {
+        a.classList.remove("nav-disabled");
+        a.removeAttribute("aria-disabled");
+        a.removeAttribute("title");
+      }
+    });
+  }
+
   // ---- guide content -----------------------------------------------------
   const GUIDE_HTML = `
     <h3>1. Connection</h3>
@@ -268,7 +566,7 @@
   };
 
   const handlers = {
-    connection() { },
+    connection() { renderConnectionPage(); },
 
     collections: async () => {
       const tbl = $("#collections-table");
@@ -801,21 +1099,6 @@
       const sb = $("#app-sidebar");
       if (sb && !sb.contains(ev.target) && ev.target !== toggle && !toggle.contains(ev.target)) {
         document.body.classList.remove("sidebar-open");
-      }
-    });
-
-    const cf = $("#form-connection");
-    if (cf) cf.addEventListener("submit", async ev => {
-      ev.preventDefault();
-      const uri = $("#conn-uri").value.trim();
-      const database = $("#conn-db").value.trim();
-      $("#conn-state").textContent = CONTENT.connection.state_connecting;
-      try {
-        const r = await fetchJson("POST", "/api/connect", { uri, database });
-        const stateKey = `state_${r.topology}`;
-        $("#conn-state").textContent = CONTENT.connection[stateKey] || JSON.stringify(r);
-      } catch (e) {
-        $("#conn-state").textContent = e.message;
       }
     });
   })();

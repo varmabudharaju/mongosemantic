@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from datetime import date, datetime
+from decimal import Decimal
+from uuid import UUID
+
+from bson import ObjectId
 from fastapi import APIRouter, HTTPException, Query
 
 from mongosemantic.commands.search import _run_one, hybrid_available, run_one_hybrid
@@ -12,6 +17,43 @@ from mongosemantic.web.identifiers import IdentifierError, validate_identifier
 
 router = APIRouter()
 
+# Common BSON / Python scalars that pydantic v2 either chokes on or serializes
+# inconsistently across versions. We stringify these so the UI gets a useful
+# value rather than a silent drop (e.g. `released` datetime, `imdb.rating`
+# Decimal128, nested ObjectId in `cast` for collections that store refs).
+_STRINGIFY_TYPES = (datetime, date, UUID, Decimal, ObjectId)
+
+
+def _safe(v: object) -> object | None:
+    """Recursively convert a value to something JSON-safe.
+
+    - Primitives (None, str, int, float, bool) pass through.
+    - Common BSON / Python scalars (datetime, Decimal, UUID, ObjectId) get
+      stringified.
+    - Lists/tuples are recursed; opaque elements drop out.
+    - Dicts (string keys only) are recursed; opaque values drop out.
+    - Anything else — notably `bytes` and `bson.binary.Binary` (Atlas's
+      pre-computed `plot_embedding` blobs are 6+ KB of these) — returns
+      None and the caller drops the field. Pydantic v2 would otherwise
+      raise UnicodeDecodeError mid-encoding.
+    """
+    if v is None or isinstance(v, (str, int, float, bool)):
+        return v
+    if isinstance(v, _STRINGIFY_TYPES):
+        return str(v)
+    if isinstance(v, (list, tuple)):
+        return [s for s in (_safe(x) for x in v) if s is not None]
+    if isinstance(v, dict):
+        out: dict = {}
+        for k, x in v.items():
+            if not isinstance(k, str):
+                continue
+            s = _safe(x)
+            if s is not None:
+                out[k] = s
+        return out
+    return None  # opaque (bytes, Binary, custom classes) -> drop
+
 
 def _serialize(row: dict) -> dict:
     out = {
@@ -21,9 +63,17 @@ def _serialize(row: dict) -> dict:
     }
     src = row.get("source_doc")
     if isinstance(src, dict):
-        clean = {k: v for k, v in src.items() if not k.startswith("_") or k == "_id"}
-        if "_id" in clean:
-            clean["_id"] = str(clean["_id"])
+        # Keep user-visible fields and `_id`; drop other underscore-prefixed
+        # internals. Run every kept value through _safe so BSON blobs
+        # (e.g. plot_embedding) don't crash pydantic and useful BSON
+        # scalars (datetime, Decimal128) survive as strings.
+        clean: dict = {}
+        for k, v in src.items():
+            if k.startswith("_") and k != "_id":
+                continue
+            safe_v = _safe(v)
+            if safe_v is not None:
+                clean[k] = safe_v
         out["source_doc"] = clean
     if "source_id" in out:
         out["source_id"] = str(out["source_id"])
@@ -42,7 +92,7 @@ def search(
             validate_identifier(collection)
         except IdentifierError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     notice: str | None = None
     try:
