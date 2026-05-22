@@ -92,7 +92,7 @@ def search(
             validate_identifier(collection)
         except IdentifierError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     notice: str | None = None
     try:

@@ -40,7 +40,7 @@ def aggregation(name: str = Path(...), req: AggregationRequest = ...) -> dict:
         validate_pipeline(req.pipeline)
     except PipelineSafetyError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
         cursor = conn.db[name].aggregate(req.pipeline, maxTimeMS=MAX_TIME_MS)

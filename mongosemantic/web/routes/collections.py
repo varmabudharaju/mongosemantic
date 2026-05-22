@@ -23,7 +23,7 @@ def _band(score: int) -> str:
 
 @router.get("/api/collections")
 def list_collections() -> dict:
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
         configured = {c.collection: c for c in list_configured(conn.db)}
@@ -52,7 +52,7 @@ def get_config(name: str = Path(...)) -> dict:
         validate_identifier(name)
     except IdentifierError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
         cfg = load_config(conn.db, name)
@@ -80,7 +80,7 @@ def sample(name: str = Path(...), limit: int = Query(5, ge=1, le=20)) -> dict:
         validate_identifier(name)
     except IdentifierError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
         from mongosemantic.mcp_server.tools import _stringify, _strip_embedding_fields
@@ -102,7 +102,7 @@ def inspect(
         validate_identifier(name)
     except IdentifierError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
         stats = inspect_collection(conn.db[name], sample_size=sample)

@@ -98,7 +98,7 @@ def visualize(
             validate_identifier(field)
     except IdentifierError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
         cfg = load_config(conn.db, name)

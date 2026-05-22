@@ -22,6 +22,16 @@ def detect_topology(
         return Topology.REPLICA_SET
     return Topology.STANDALONE
 
+
+def _uri_uses_tls(uri: str) -> bool:
+    """True iff the URI implies TLS — either mongodb+srv:// (TLS by default
+    per the spec) or an explicit tls=true / ssl=true query parameter."""
+    if uri.startswith("mongodb+srv://"):
+        return True
+    low = uri.lower()
+    return "tls=true" in low or "ssl=true" in low
+
+
 @dataclass
 class MongoConnection:
     client: MongoClient
@@ -34,10 +44,11 @@ class MongoConnection:
         # Default tlsCAFile to certifi's bundle so TLS verification works on
         # systems whose Python lacks a discoverable system CA bundle (notably
         # macOS python.org / Apple Python without Install Certificates.command).
-        # Skipped when the URI already specifies tlsCAFile so users with a
-        # private/corporate CA aren't silently overridden.
+        # Only inject it when TLS is actually in play — otherwise we'd force
+        # TLS onto plain `mongodb://localhost` URIs (e.g. local Docker) and
+        # cause an "SSL handshake failed" error against a non-TLS server.
         kwargs: dict = {"serverSelectionTimeoutMS": 5000}
-        if "tlsCAFile" not in uri:
+        if _uri_uses_tls(uri) and "tlsCAFile" not in uri:
             kwargs["tlsCAFile"] = certifi.where()
         client = MongoClient(uri, **kwargs)
         info = client.admin.command("hello")  # single call, reused by detect_topology
