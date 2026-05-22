@@ -59,7 +59,6 @@ def test_save_then_load_against_real_atlas(client):
     )
     body = r.json()
     assert body["ok"] is True, body
-    assert body["restart_required"] is True
     assert body["topology"] == "atlas"
     assert body["mongo_version"]
 

@@ -18,3 +18,7 @@ htmlcov/
 _session-handoff.md
 .claude/
 .superpowers/
+
+# Atlas credentials — local-only env file for the verification suite.
+# Contains MONGOSEMANTIC_ATLAS_URI with an embedded password. NEVER commit.
+.atlas.env
