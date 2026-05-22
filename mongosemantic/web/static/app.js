@@ -207,26 +207,44 @@
     return sel;
   }
 
-  // Wire URI blur on a form to call /api/connection/list-databases and either
-  // morph the DB field into a populated <select> or leave the text input alone.
-  function wireUriBlurPopulator(uriId, dbId) {
+  // Wire URI blur on a form to call /api/connection/list-databases.
+  // On success: morph the DB text input into a <select> of real db names.
+  // On failure: surface the error inline so the user knows what happened.
+  // While in flight: show a "Checking databases…" hint next to the DB field.
+  function wireUriBlurPopulator(uriId, dbId, hintId) {
     const uriInput = document.getElementById(uriId);
     if (!uriInput) return;
+    const hint = hintId && document.getElementById(hintId);
+    let lastUri = "";
     uriInput.addEventListener("blur", async () => {
       const uri = uriInput.value.trim();
+      if (!uri || uri === lastUri) return;
       if (!uri.startsWith("mongodb://") && !uri.startsWith("mongodb+srv://")) return;
+      lastUri = uri;
+      if (hint) { hint.hidden = false; hint.className = "conn-hint info"; hint.textContent = "Checking databases…"; }
       let res;
       try { res = await fetchJson("POST", "/api/connection/list-databases", { uri }); }
-      catch { return; }  // network/HTTP failure — leave text input untouched
-      if (!res.ok || !Array.isArray(res.databases) || res.databases.length === 0) return;
+      catch (err) {
+        if (hint) { hint.className = "conn-hint error"; hint.textContent = "Couldn't reach cluster: " + err.message; }
+        return;
+      }
+      if (!res.ok) {
+        if (hint) { hint.className = "conn-hint error"; hint.textContent = `${res.error.message} ${res.error.hint || ""}`.trim(); }
+        return;
+      }
+      if (!Array.isArray(res.databases) || res.databases.length === 0) {
+        if (hint) { hint.className = "conn-hint info"; hint.textContent = "Connected, but no user-visible databases yet — type one to create it on first write."; }
+        return;
+      }
       morphDbInputToSelect(dbId, res.databases, res.default);
+      if (hint) { hint.className = "conn-hint success"; hint.textContent = `Pick one of ${res.databases.length} database${res.databases.length === 1 ? "" : "s"}.`; }
     });
   }
 
   function wireConnNewForm() {
     const form = $("#conn-form-new");
     const errBox = $("#conn-form-new-error");
-    wireUriBlurPopulator("conn-form-new-uri", "conn-form-new-db");
+    wireUriBlurPopulator("conn-form-new-uri", "conn-form-new-db", "conn-form-new-hint");
     form.onsubmit = async (e) => {
       e.preventDefault();
       errBox.hidden = true;
@@ -276,7 +294,7 @@
       }
       $("#conn-form-change-db").value = state.database;
       $("#conn-form-change").hidden = false;
-      wireUriBlurPopulator("conn-form-change-uri", "conn-form-change-db");
+      wireUriBlurPopulator("conn-form-change-uri", "conn-form-change-db", "conn-form-change-hint");
     };
 
     $("#conn-form-change-cancel").onclick = () => {

@@ -927,3 +927,13 @@ pre#query-results {
   pointer-events: none;
   cursor: not-allowed;
 }
+
+.conn-hint {
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.conn-hint.info    { background: #e8f4fd; color: #0b6cb1; }
+.conn-hint.success { background: #e8f5e9; color: #13632b; }
+.conn-hint.error   { background: #fdecea; color: #c0392b; }

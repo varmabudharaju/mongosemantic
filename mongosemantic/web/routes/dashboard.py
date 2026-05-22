@@ -80,7 +80,9 @@ def dashboard() -> dict:
 
 @router.get("/api/jobs/status")
 def jobs_status() -> dict:
-    settings = Settings.from_environment()
+    settings = Settings.try_from_environment()
+    if settings is None:
+        return {"jobs": {}, "not_connected": True}
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
         return {"jobs": count_by_status(conn.db)}
