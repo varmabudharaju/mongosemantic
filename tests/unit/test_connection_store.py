@@ -9,6 +9,7 @@ from mongosemantic.connection_store import (
     SavedConnection,
     config_path,
     delete,
+    extract_path_database,
     load,
     save,
 )
@@ -105,3 +106,32 @@ def test_save_overwrite_preserves_0600(isolated_home):
     save("mongodb+srv://x:y@z.mongodb.net/", "db2")  # overwrite
     mode = stat.S_IMODE(config_path().stat().st_mode)
     assert mode == 0o600
+
+
+def test_extract_path_db_with_database():
+    assert extract_path_database(
+        "mongodb+srv://u:p@cluster.mongodb.net/sample_mflix"
+    ) == "sample_mflix"
+
+
+def test_extract_path_db_with_query_string():
+    assert extract_path_database(
+        "mongodb+srv://u:p@cluster.mongodb.net/sample_mflix?tls=true&retryWrites=true"
+    ) == "sample_mflix"
+
+
+def test_extract_path_db_trailing_slash():
+    assert extract_path_database("mongodb+srv://u:p@cluster.mongodb.net/") is None
+
+
+def test_extract_path_db_no_path():
+    assert extract_path_database("mongodb+srv://u:p@cluster.mongodb.net") is None
+
+
+def test_extract_path_db_no_creds():
+    assert extract_path_database("mongodb://localhost:27017/mydb") == "mydb"
+
+
+def test_extract_path_db_garbage_returns_none():
+    assert extract_path_database("not a uri") is None
+    assert extract_path_database("") is None

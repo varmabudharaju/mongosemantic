@@ -184,9 +184,49 @@
     $("#conn-devhelp-path").textContent = configPath;
   }
 
+  // Replace a `<input>` element with a `<select>` carrying the same id/name,
+  // populated with the given database names. Returns the new element.
+  function morphDbInputToSelect(inputId, databases, selected) {
+    const old = document.getElementById(inputId);
+    if (!old) return null;
+    if (old.tagName === "SELECT") {
+      // Already a select — just refresh options.
+      old.innerHTML = "";
+    } else {
+      const sel = document.createElement("select");
+      sel.id = old.id; sel.name = old.name;
+      old.replaceWith(sel);
+    }
+    const sel = document.getElementById(inputId);
+    for (const name of databases) {
+      const opt = document.createElement("option");
+      opt.value = name; opt.textContent = name;
+      if (name === selected) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    return sel;
+  }
+
+  // Wire URI blur on a form to call /api/connection/list-databases and either
+  // morph the DB field into a populated <select> or leave the text input alone.
+  function wireUriBlurPopulator(uriId, dbId) {
+    const uriInput = document.getElementById(uriId);
+    if (!uriInput) return;
+    uriInput.addEventListener("blur", async () => {
+      const uri = uriInput.value.trim();
+      if (!uri.startsWith("mongodb://") && !uri.startsWith("mongodb+srv://")) return;
+      let res;
+      try { res = await fetchJson("POST", "/api/connection/list-databases", { uri }); }
+      catch { return; }  // network/HTTP failure — leave text input untouched
+      if (!res.ok || !Array.isArray(res.databases) || res.databases.length === 0) return;
+      morphDbInputToSelect(dbId, res.databases, res.default);
+    });
+  }
+
   function wireConnNewForm() {
     const form = $("#conn-form-new");
     const errBox = $("#conn-form-new-error");
+    wireUriBlurPopulator("conn-form-new-uri", "conn-form-new-db");
     form.onsubmit = async (e) => {
       e.preventDefault();
       errBox.hidden = true;
@@ -227,8 +267,16 @@
     $("#conn-btn-change").onclick = () => {
       // Prefill with current values — but uri_redacted has "<redacted>", so blank instead.
       $("#conn-form-change-uri").value = state.uri_redacted.includes("<redacted>") ? "" : state.uri_redacted;
+      // Reset DB field to a plain input each time the form opens.
+      const dbEl = $("#conn-form-change-db");
+      if (dbEl.tagName === "SELECT") {
+        const input = document.createElement("input");
+        input.id = dbEl.id; input.name = dbEl.name;
+        dbEl.replaceWith(input);
+      }
       $("#conn-form-change-db").value = state.database;
       $("#conn-form-change").hidden = false;
+      wireUriBlurPopulator("conn-form-change-uri", "conn-form-change-db");
     };
 
     $("#conn-form-change-cancel").onclick = () => {

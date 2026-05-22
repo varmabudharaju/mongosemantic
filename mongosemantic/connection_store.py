@@ -77,3 +77,23 @@ def delete() -> None:
     """Remove the config file if it exists; silently ignore if absent."""
     with contextlib.suppress(FileNotFoundError):
         config_path().unlink()
+
+
+def extract_path_database(uri: str) -> str | None:
+    """Extract the default database from a Mongo URI's path component.
+
+    mongodb+srv://user:pass@cluster.mongodb.net/sample_mflix     -> "sample_mflix"
+    mongodb+srv://user:pass@cluster.mongodb.net/x?tls=true       -> "x"
+    mongodb+srv://user:pass@cluster.mongodb.net/                 -> None
+    mongodb+srv://user:pass@cluster.mongodb.net                  -> None
+    """
+    try:
+        after_scheme = uri.split("://", 1)[1]
+    except IndexError:
+        return None
+    after_at = after_scheme.split("@", 1)[-1] if "@" in after_scheme else after_scheme
+    parts = after_at.split("/", 1)
+    if len(parts) < 2:
+        return None
+    path = parts[1].split("?", 1)[0].strip()
+    return path or None

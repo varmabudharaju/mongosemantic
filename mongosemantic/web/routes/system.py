@@ -39,6 +39,10 @@ class SaveRequest(BaseModel):
     database: str
 
 
+class UriRequest(BaseModel):
+    uri: str
+
+
 def _redact(uri: str) -> str:
     """Mask credentials. mongodb+srv://user:pass@host -> mongodb+srv://<redacted>@host."""
     if "@" not in uri:
@@ -216,3 +220,42 @@ def delete_connection() -> dict:
 @router.get("/api/connection/config-path")
 def connection_config_path() -> dict:
     return {"path": str(connection_store.config_path())}
+
+
+# System databases excluded from the picker by default — users rarely want them.
+_HIDDEN_DBS = {"admin", "local", "config"}
+
+
+@router.post("/api/connection/list-databases")
+def list_databases(req: UriRequest) -> dict:
+    """Open a temp connection and return the cluster's user-visible databases.
+
+    Used by the Connection page to populate a database picker after the user
+    pastes a URI. The URI is NOT saved here — this is a probe.
+    """
+    prefix_err = validate_uri_prefix(req.uri)
+    if prefix_err is not None:
+        return _err(prefix_err)
+
+    try:
+        conn = MongoConnection.open(req.uri, "admin")
+    except Exception as exc:  # noqa: BLE001
+        return _err(map_exception(exc), uri=req.uri)
+
+    try:
+        result = conn.client.admin.command("listDatabases", nameOnly=True)
+        names = [
+            d["name"] for d in result.get("databases", [])
+            if d.get("name") not in _HIDDEN_DBS
+        ]
+        return {
+            "ok": True,
+            "databases": sorted(names),
+            "default": connection_store.extract_path_database(req.uri),
+        }
+    except Exception as exc:  # noqa: BLE001
+        # Some users have connect access but no listDatabases privilege; let
+        # the client fall back to a text input gracefully.
+        return _err(map_exception(exc), uri=req.uri)
+    finally:
+        conn.close()

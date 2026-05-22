@@ -256,3 +256,66 @@ def test_save_failure_scrubs_uri_from_details(monkeypatch, isolated_xdg):
     # Raw URI (with password) must not appear anywhere in the response.
     assert "leakpass" not in r.text
     assert "leakuser:leakpass" not in r.text
+
+
+def test_list_databases_returns_filtered(monkeypatch, isolated_xdg):
+    client = _client_no_env(monkeypatch)
+    token, headers = _csrf(client)
+    fake_conn = MagicMock()
+    fake_conn.client.admin.command.return_value = {
+        "databases": [
+            {"name": "sample_mflix"},
+            {"name": "admin"},     # filtered
+            {"name": "local"},     # filtered
+            {"name": "config"},    # filtered
+            {"name": "myapp"},
+        ]
+    }
+    with patch(
+        "mongosemantic.web.routes.system.MongoConnection.open",
+        return_value=fake_conn,
+    ):
+        r = client.post(
+            "/api/connection/list-databases",
+            json={"uri": "mongodb+srv://u:p@cluster.mongodb.net/sample_mflix"},
+            headers=headers,
+        )
+    body = r.json()
+    assert body["ok"] is True
+    assert body["databases"] == ["myapp", "sample_mflix"]
+    assert body["default"] == "sample_mflix"
+
+
+def test_list_databases_rejects_bad_scheme(monkeypatch, isolated_xdg):
+    client = _client_no_env(monkeypatch)
+    token, headers = _csrf(client)
+    r = client.post(
+        "/api/connection/list-databases",
+        json={"uri": "http://nope"},
+        headers=headers,
+    )
+    body = r.json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "bad_scheme"
+
+
+def test_list_databases_maps_open_failure(monkeypatch, isolated_xdg):
+    client = _client_no_env(monkeypatch)
+    token, headers = _csrf(client)
+    from pymongo.errors import OperationFailure
+
+    def fake_open(uri, db):
+        raise OperationFailure("auth failed", code=18)
+
+    with patch(
+        "mongosemantic.web.routes.system.MongoConnection.open",
+        side_effect=fake_open,
+    ):
+        r = client.post(
+            "/api/connection/list-databases",
+            json={"uri": "mongodb+srv://u:p@cluster.mongodb.net/"},
+            headers=headers,
+        )
+    body = r.json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "auth_failed"
