@@ -89,6 +89,21 @@
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 
+  // Render one Mongo document as a compact key/value card. Truncates long
+  // string values; arrays/objects/IDs get a short tag like "[12 items]".
+  function renderSampleDoc(doc) {
+    const rows = Object.entries(doc).map(([k, v]) => {
+      let display;
+      if (v === null) display = "null";
+      else if (Array.isArray(v)) display = `[${v.length} item${v.length === 1 ? "" : "s"}]`;
+      else if (typeof v === "object") display = v.$oid ? `ObjectId(${v.$oid.slice(0, 6)}…)` : "{…}";
+      else if (typeof v === "string") display = v.length > 80 ? v.slice(0, 80) + "…" : v;
+      else display = String(v);
+      return `<dt>${escapeHtml(k)}</dt><dd title="${escapeHtml(typeof v === "string" ? v : "")}">${escapeHtml(display)}</dd>`;
+    }).join("");
+    return `<div class="sample-doc"><dl>${rows}</dl></div>`;
+  }
+
   // ---- connection page state machine + actions ---------------------------
 
   async function renderConnectionPage() {
@@ -640,8 +655,19 @@
       if (!name) return;
       $("#inspect-title").textContent = CONTENT.inspect.title.replace("{collection}", name);
       $("#inspect-apply-link").href = `#/apply/${encodeURIComponent(name)}`;
+
+      // Sample documents — rendered first so users see the data before stats.
       const sample = $("#inspect-sample");
-      sample.textContent = "loading…";
+      sample.innerHTML = '<p class="sample-doc-empty">loading sample…</p>';
+      try {
+        const s = await fetchJson("GET", `/api/collections/${encodeURIComponent(name)}/sample?limit=3`);
+        sample.innerHTML = (s.documents || []).map(renderSampleDoc).join("")
+          || '<p class="sample-doc-empty">No documents in this collection.</p>';
+      } catch (e) {
+        sample.innerHTML = `<p class="sample-doc-empty">Could not load sample: ${escapeHtml(e.message)}</p>`;
+      }
+
+      // Field analysis table.
       try {
         const data = await fetchJson("GET", `/api/collections/${encodeURIComponent(name)}/inspect`);
         $("#inspect-subtitle").textContent =
@@ -662,12 +688,6 @@
         </tr>`).join("");
         $("#inspect-table").innerHTML = head + "<tbody>" + rows + "</tbody>";
       } catch (e) { toast(e.message); }
-      try {
-        const s = await fetchJson("GET", `/api/collections/${encodeURIComponent(name)}/sample?limit=3`);
-        sample.textContent = JSON.stringify(s.documents, null, 2);
-      } catch (e) {
-        sample.textContent = "(could not load sample: " + e.message + ")";
-      }
     },
 
     apply: async ([name]) => {
@@ -681,12 +701,17 @@
         if (cfg.configured) existing = cfg;
       } catch { /* no config yet; new apply */ }
       const isReconfigure = !!existing;
-      // Title morphs to reflect intent.
+      // Load the inspected field list so we can show checkboxes instead of
+      // a free-form text input. Falls back to a text input if inspect fails.
+      let inspected = null;
+      try {
+        inspected = await fetchJson("GET", `/api/collections/${encodeURIComponent(name)}/inspect`);
+      } catch { /* fall through to text input fallback below */ }
       const titleEl = document.querySelector("#page-apply h2");
       if (titleEl) titleEl.textContent = isReconfigure
         ? `Reconfigure ${name}` : `Configure ${name}`;
       const submitLabel = isReconfigure ? "Save changes" : escapeHtml(c.cta_apply);
-      const initialFields  = isReconfigure ? existing.fields.join(", ") : "";
+      const initialFields  = isReconfigure ? existing.fields : [];
       const initialMode    = isReconfigure ? existing.mode : "shadow";
       const initialChunked = isReconfigure ? existing.chunked : false;
       const initialModel   = isReconfigure ? existing.model : "local-fast";
@@ -699,10 +724,34 @@
       ].map(([val, label]) =>
         `<option value="${val}" ${val === initialModel ? "selected" : ""}>${escapeHtml(label)}</option>`
       ).join("");
+      // Fields UI: checkboxes if /inspect succeeded, else a comma-list input.
+      let fieldsBlock;
+      if (inspected && Array.isArray(inspected.fields) && inspected.fields.length) {
+        const eligible = inspected.fields.filter(x => x.band !== "not_recommended");
+        if (!eligible.length) {
+          fieldsBlock = `<p class="apply-field-empty">No text-shaped fields were detected in this collection. Embed something else first.</p>`;
+        } else {
+          const initialSet = new Set(initialFields);
+          fieldsBlock = `<div class="apply-field-list">` +
+            eligible.map(field => {
+              const checked = initialSet.has(field.path) ? "checked" : "";
+              const bandLabel = CONTENT.inspect["band_" + field.band] || field.band;
+              return `<label class="apply-field-row">
+                <input type="checkbox" name="apply-field" value="${escapeHtml(field.path)}" ${checked}>
+                <code>${escapeHtml(field.path)}</code>
+                <span class="band band-${escapeHtml(field.band)}">${escapeHtml(bandLabel)}</span>
+              </label>`;
+            }).join("") +
+            `</div>`;
+        }
+      } else {
+        // Fallback if inspect failed: original free-form input.
+        fieldsBlock = `<input id="apply-fields" placeholder="comma-separated paths, e.g. body, title" value="${escapeHtml(initialFields.join(", "))}">`;
+      }
       f.innerHTML = `
         <fieldset>
           <legend>${escapeHtml(c.section_fields)}</legend>
-          <input id="apply-fields" placeholder="comma-separated paths, e.g. body, title" value="${escapeHtml(initialFields)}">
+          ${fieldsBlock}
         </fieldset>
         <fieldset>
           <legend>${escapeHtml(c.section_mode)}</legend>
@@ -720,12 +769,21 @@
           <select id="apply-model">${modelOptions}</select>
           <small style="display:block;margin-top:6px">Changing the model from the current value requires a migration, not just a reconfigure. Use the Migrate action on the Collections page instead.</small>
         </fieldset>
-        <button type="submit">${submitLabel}</button>
+        <button type="submit" class="cta-button" style="border:none;cursor:pointer">${submitLabel}</button>
         ${isReconfigure ? `<p style="margin-top:12px;font-size:13px;color:var(--mdb-ink-muted)">After saving, click <em>Reindex</em> on the Collections page to clear and re-embed with the new field set.</p>` : ""}
       `;
       f.onsubmit = async ev => {
         ev.preventDefault();
-        const fields = $("#apply-fields").value.split(",").map(s => s.trim()).filter(Boolean);
+        // Read selected fields from checkboxes if present, else from the
+        // fallback text input.
+        let fields;
+        const checks = f.querySelectorAll('input[name="apply-field"]:checked');
+        if (checks.length || f.querySelector('input[name="apply-field"]')) {
+          fields = Array.from(checks).map(el => el.value);
+        } else {
+          fields = $("#apply-fields").value.split(",").map(s => s.trim()).filter(Boolean);
+        }
+        if (!fields.length) { toast("Pick at least one field to embed."); return; }
         const mode = (f.querySelector('input[name="mode"]:checked') || {}).value || "shadow";
         const chunked = $("#apply-chunked").checked;
         const model = $("#apply-model").value;

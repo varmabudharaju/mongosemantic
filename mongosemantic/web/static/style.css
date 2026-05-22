@@ -937,3 +937,99 @@ pre#query-results {
 .conn-hint.info    { background: #e8f4fd; color: #0b6cb1; }
 .conn-hint.success { background: #e8f5e9; color: #13632b; }
 .conn-hint.error   { background: #fdecea; color: #c0392b; }
+
+/* ===== Inspect page: sample preview + section titles =================== */
+
+.inspect-section-title {
+  margin: 32px 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.inspect-section-hint {
+  color: var(--mdb-ink-muted);
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+#inspect-sample {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+.sample-doc {
+  background: #fff;
+  border: 1px solid var(--mdb-line);
+  border-radius: 8px;
+  padding: 14px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  overflow: hidden;
+}
+.sample-doc dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+.sample-doc dt {
+  color: var(--mdb-ink-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.sample-doc dd {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sample-doc-empty {
+  color: var(--mdb-ink-muted);
+  font-style: italic;
+}
+
+/* Big green CTA button (Configure semantic search etc) */
+.cta-button {
+  display: inline-block;
+  background: #13aa52;
+  color: #fff !important;
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+.cta-button:hover { background: #0f8a42; }
+.cta-button:focus { outline: 2px solid #0f8a42; outline-offset: 2px; }
+
+/* ===== Apply form: field checkboxes ==================================== */
+
+.apply-field-list {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 8px;
+}
+.apply-field-row {
+  display: grid;
+  grid-template-columns: max-content 1fr max-content;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 12px;
+  background: #fff;
+  border: 1px solid var(--mdb-line);
+  border-radius: 6px;
+}
+.apply-field-row:hover { background: #f4f7f8; }
+.apply-field-row code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.apply-field-row .band {
+  font-size: 11px;
+}
+.apply-field-empty {
+  padding: 12px;
+  color: var(--mdb-ink-muted);
+  font-style: italic;
+  background: #f4f7f8;
+  border-radius: 6px;
+}
