@@ -22,6 +22,16 @@ def detect_topology(
         return Topology.REPLICA_SET
     return Topology.STANDALONE
 
+
+def _uri_uses_tls(uri: str) -> bool:
+    """True iff the URI implies TLS — either mongodb+srv:// (TLS by default
+    per the spec) or an explicit tls=true / ssl=true query parameter."""
+    if uri.startswith("mongodb+srv://"):
+        return True
+    low = uri.lower()
+    return "tls=true" in low or "ssl=true" in low
+
+
 @dataclass
 class MongoConnection:
     client: MongoClient
@@ -48,15 +58,6 @@ class MongoConnection:
             database_name=database_name,
             topology=detect_topology(client, uri, hello_info=info),
         )
-
-
-def _uri_uses_tls(uri: str) -> bool:
-    """True iff the URI implies TLS — either mongodb+srv:// (TLS by default
-    per the spec) or an explicit tls=true / ssl=true query parameter."""
-    if uri.startswith("mongodb+srv://"):
-        return True
-    low = uri.lower()
-    return "tls=true" in low or "ssl=true" in low
 
     @property
     def db(self):
