@@ -319,3 +319,12 @@ def test_list_databases_maps_open_failure(monkeypatch, isolated_xdg):
     body = r.json()
     assert body["ok"] is False
     assert body["error"]["code"] == "auth_failed"
+
+
+def test_connection_response_includes_server_started_at(monkeypatch, isolated_xdg):
+    client = _client_no_env(monkeypatch)
+    r = client.get("/api/connection")
+    body = r.json()
+    assert "server_started_at" in body
+    assert isinstance(body["server_started_at"], int)
+    assert body["server_started_at"] > 0
