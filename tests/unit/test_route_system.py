@@ -120,7 +120,6 @@ def test_save_writes_config_on_success(monkeypatch, isolated_xdg):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["ok"] is True
-    assert body["restart_required"] is True
     saved = connection_store.load()
     assert saved is not None
     assert saved.database == "newdb"
@@ -183,7 +182,6 @@ def test_delete_removes_config(monkeypatch, isolated_xdg):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["ok"] is True
-    assert body["restart_required"] is True
     assert connection_store.load() is None
 
 
@@ -321,10 +319,3 @@ def test_list_databases_maps_open_failure(monkeypatch, isolated_xdg):
     assert body["error"]["code"] == "auth_failed"
 
 
-def test_connection_response_includes_server_started_at(monkeypatch, isolated_xdg):
-    client = _client_no_env(monkeypatch)
-    r = client.get("/api/connection")
-    body = r.json()
-    assert "server_started_at" in body
-    assert isinstance(body["server_started_at"], int)
-    assert body["server_started_at"] > 0

@@ -49,14 +49,8 @@ CONTENT: dict[str, dict[str, str]] = {
             "Running from MONGOSEMANTIC_URI environment variable. To make "
             "changes, edit the env var and restart, or unset it and use this page."
         ),
-        "banner_restart_required_save": (
-            "Saved. Restart mongosemantic ui (and mongosemantic worker if you "
-            "have one running) to start using this connection."
-        ),
-        "banner_restart_required_disconnect": (
-            "Disconnected. Restart mongosemantic ui to return to first-run state."
-        ),
-        "banner_pending_restart": "Pending restart — current session still uses the old connection.",
+        "banner_saved": "Saved. mongosemantic is now connected to {database}.",
+        "banner_disconnected": "Disconnected. Paste a new URI below to reconnect.",
 
         # Test result
         "test_success": "Connection alive — {latency_ms} ms · MongoDB {version}",
@@ -71,7 +65,7 @@ CONTENT: dict[str, dict[str, str]] = {
         "devhelp_quickref_title": "Quick reference",
         "devhelp_quickref_format": "URI format: mongodb+srv://user:pass@cluster.mongodb.net/",
         "devhelp_quickref_atlas": "Atlas: Network Access → add your IP; Database Access → user needs read on the database.",
-        "devhelp_quickref_restart": "After saving, restart mongosemantic ui (and worker if running).",
+        "devhelp_quickref_worker": "Workers read the config once at startup. If you have `mongosemantic worker` running in another terminal, restart it after changing connections.",
 
         # Disabled-nav tooltip
         "nav_disabled_tooltip": "Connect to a database first.",
