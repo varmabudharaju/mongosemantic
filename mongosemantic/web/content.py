@@ -141,15 +141,14 @@ CONTENT: dict[str, dict[str, str]] = {
     "indexing": {
         "title": "Indexing {collection}",
         "subtitle": "Embedding existing documents. You can close this page — it runs in the background.",
-        "metric_progress": "{processed} / {total} documents",
-        "metric_rate": "{rate} docs/sec",
-        "metric_eta": "ETA {duration}",
+        "metric_enqueued": "Enqueued {jobs} embed job{s} across {docs} document{ds}.",
+        "metric_worker_hint": "Run `mongosemantic worker` in another terminal to process them. Check Dashboard for queue depth.",
         "btn_pause": "Pause",
         "btn_cancel": "Cancel",
         "toast_started": "Indexing started.",
         "toast_paused": "Indexing paused at {n}/{total}.",
         "toast_resumed": "Indexing resumed.",
-        "toast_complete": "Indexing complete — {n} documents embedded.",
+        "toast_complete": "Enqueued {n} embed jobs. Worker will process them in the background.",
         "toast_failed": "Indexing failed on {n} documents. Run retry from the dashboard.",
     },
     "search": {

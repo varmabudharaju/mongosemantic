@@ -802,14 +802,26 @@
     indexing: async ([name]) => {
       if (!name) return;
       $("#indexing-title").textContent = CONTENT.indexing.title.replace("{collection}", name);
+      const bar = $("#indexing-progress");
+      const metric = $("#indexing-metric");
+      bar.max = 1; bar.value = 0;
+      metric.textContent = "Enqueueing…";
       try {
         const r = await fetchJson("POST", `/api/collections/${encodeURIComponent(name)}/index`);
-        const bar = $("#indexing-progress");
-        bar.max = r.total || r.enqueued || 1;
-        bar.value = r.enqueued;
-        $("#indexing-metric").textContent = CONTENT.indexing.metric_progress
-          .replace("{processed}", r.enqueued).replace("{total}", r.total);
-        toast(CONTENT.indexing.toast_complete.replace("{n}", r.enqueued));
+        // Enqueueing is synchronous and complete by the time this returns.
+        // Show the progress bar as full + a clear count + worker hint.
+        bar.max = 1; bar.value = 1;
+        const jobs = r.enqueued || 0;
+        const docs = r.total || 0;
+        const c = CONTENT.indexing;
+        metric.innerHTML =
+          escapeHtml(c.metric_enqueued
+            .replace("{jobs}", jobs)
+            .replace("{s}", jobs === 1 ? "" : "s")
+            .replace("{docs}", docs)
+            .replace("{ds}", docs === 1 ? "" : "s")) +
+          `<br><small style="color:var(--mdb-ink-muted)">${escapeHtml(c.metric_worker_hint)}</small>`;
+        toast(c.toast_complete.replace("{n}", jobs));
       } catch (e) { toast(e.message); }
     },
 
