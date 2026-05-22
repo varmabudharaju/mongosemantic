@@ -35,24 +35,38 @@ review-vs-execution gap in the project per `docs/HANDOFF.md`.
 
 ## Dataset
 
-`sample_airbnb.listingsAndReviews`, loaded via Atlas console's "Load
+`sample_mflix.embedded_movies`, loaded via Atlas console's "Load
 Sample Dataset" button.
 
-Rationale: 5,555 documents, ~40 MB (fits M0 easily), multiple rich text
-fields, nested arrays, models a realistic listings-platform workload.
-Single collection covers shadow + inline + chunked + multi-field
-+ migration scenarios without juggling multiple seeders.
+Rationale: 3,483 documents, Atlas's own curated subset of the mflix
+corpus shipped specifically as the Vector Search demo dataset. Has rich
+text fields (`title`, `plot`, `fullplot`), nested arrays (`genres`,
+`cast`, `directors`), and fits M0 with embeddings. Single collection
+covers shadow + inline + chunked + multi-field + migration scenarios
+without juggling multiple seeders.
+
+**Dataset pivot history (on-execution):**
+
+1. Original spec: `sample_airbnb.listingsAndReviews` (5,555 docs). Pivoted
+   on execution because only `sample_mflix` had been loaded on the
+   verification cluster and re-loading would have added a manual round trip.
+2. Second choice: `sample_mflix.movies` (21,349 docs). Pivoted again because
+   Atlas per-doc latency made `mongosemantic index` over 21k docs take ~60 min
+   — impractical for a verification suite that re-runs before every release.
+3. Final: `sample_mflix.embedded_movies` (3,483 docs). Same field shape as
+   `movies` (it's a curated subset), is Atlas's official Vector Search demo
+   dataset (more recognizable in docs), and indexes end-to-end in ~5 min.
 
 ## Field strategy
 
-All operations run against `sample_airbnb.listingsAndReviews`:
+All operations run against `sample_mflix.embedded_movies`:
 
 | Phase | Mode | Fields | Path exercised |
 |---|---|---|---|
-| Apply A | shadow, multi-field | `summary`, `description` | `$vectorSearch` multi-field merge |
-| Apply B | shadow, chunked | `house_rules` | Chunked indexing on Atlas |
-| Apply C | inline | `neighborhood_overview` | Inline mode on Atlas |
-| Migrate | shadow → `local-better` | `summary` | Migration carry-over |
+| Apply A | shadow, multi-field | `title`, `plot` | `$vectorSearch` multi-field merge |
+| Apply B | shadow, chunked | `fullplot` | Chunked indexing on Atlas |
+| Apply C | inline | `plot` | Inline mode on Atlas |
+| Migrate | shadow → `local-better` | `title` | Migration carry-over |
 
 ## Architecture
 
@@ -89,7 +103,7 @@ assert-style functions may share the module fixture. This honors the
 Atlas reality: index builds take 30–90 s and re-applies are stateful,
 so sequential orchestration is the right unit, not isolated tests.
 
-Tests share the single `listingsAndReviews` collection but run in
+Tests share the single `embedded_movies` collection but run in
 order via filename (pytest default) and clean up their config in
 teardown so the next tier starts from a known state.
 
@@ -98,7 +112,7 @@ teardown so the next tier starts from a known state.
 - `atlas_client` — session-scoped `MongoClient` pointing at the URI.
 - `atlas_topology` — asserts `Topology: atlas` (skip suite cleanly if
   the URI is not Atlas).
-- `atlas_dataset_loaded` — asserts `sample_airbnb.listingsAndReviews`
+- `atlas_dataset_loaded` — asserts `sample_mflix.embedded_movies`
   exists with >= 5,000 docs; fails fast with an actionable message
   ("Load 'Sample Dataset' in the Atlas console") if not.
 - `wait_for_search_index_queryable(client, db, coll, name, timeout=120)`
@@ -106,8 +120,8 @@ teardown so the next tier starts from a known state.
 
 ### Files modified
 
-- `docs/atlas-setup.md` — rewritten to use `sample_airbnb` instead of
-  `seed_demo.py`; field names updated to airbnb fields throughout.
+- `docs/atlas-setup.md` — rewritten to use `sample_mflix` instead of
+  `seed_demo.py`; field names updated to embedded_movies fields throughout.
 - `docs/HANDOFF.md` — section "What's working but not live-tested
   against real Atlas" → those bullets move into "What's working".
 - `docs/superpowers/specs/2026-05-19-atlas-verification-design.md` —
@@ -121,7 +135,7 @@ Run in order. Each tier gates the next.
 ### Tier 1 — Smoke (~5 min, fail fast)
 
 Connect → load sample dataset → `mongosemantic status` reports
-`Topology: atlas` → `apply` on `listingsAndReviews` with `summary`
+`Topology: atlas` → `apply` on `embedded_movies` with `title`
 only → `index` → `worker --once` → `search` returns hits.
 
 **Stop here if it fails.** No deeper tier is meaningful until the
@@ -129,7 +143,7 @@ basic Atlas wiring works.
 
 ### Tier 2 — Vector + multi-field
 
-Re-`apply` to shadow multi-field on `summary,description`. Verify
+Re-`apply` to shadow multi-field on `title,plot`. Verify
 `$vectorSearch` runs Atlas-side (not brute-force fallback) and merged
 scores fall in the 0.6–0.8 cosine range. Codified as
 `test_vector_search.py`.
@@ -149,23 +163,23 @@ Codified as `test_hybrid_rankfusion.py`.
 
 ### Tier 5 — Chunked + inline
 
-Re-`apply` with `--chunked` on `house_rules`. Verify multiple
+Re-`apply` with `--chunked` on `fullplot`. Verify multiple
 `_chunks` entries per doc on Atlas, and that chunked search returns
 paragraph-level excerpts. Then re-`apply` with `--mode inline` on
-`neighborhood_overview`. Verify inline embedding writes under
+`plot`. Verify inline embedding writes under
 `_msem.{field}`. Codified as `test_chunked_inline.py`.
 
 ### Tier 6 — Migration carry-over
 
-`mongosemantic migrate -c listingsAndReviews -m local-better` to
-move `summary` from 384-d to 768-d. Verify:
+`mongosemantic migrate -c embedded_movies -m local-better` to
+move `title` from 384-d to 768-d. Verify:
 
 1. CLI progress bar reaches 100%.
-2. Top-1 result for a control query is the same listing before and
+2. Top-1 result for a control query is the same movie before and
    after migration.
 3. Both `mongosemantic_*` and `mongosemantic_search_*` indexes exist
    on the renamed embeddings collection with `_mig_<ts>` markers.
-4. `listingsAndReviews_embeddings_archive_<ts>` still holds the old
+4. `embedded_movies_embeddings_archive_<ts>` still holds the old
    384-d vectors.
 
 Codified as `test_migration_carryover.py`.
@@ -178,7 +192,7 @@ Codified as `test_migration_carryover.py`.
 - Search returns results at Atlas latencies (50–150 ms).
 - Hybrid toggle does **not** show the amber fallback banner (assuming
   8.1+).
-- Visualize page renders the airbnb embeddings.
+- Visualize page renders the embedded_movies embeddings.
 - Migrate modal works end-to-end with polled progress.
 
 Not codified. If a UI failure surfaces, the per-bug workflow runs but
@@ -237,7 +251,7 @@ Co-Authored-By Claude/Anthropic trailers.
 Single PR (`feat/atlas-verification`) containing:
 
 - The new `tests/integration/atlas/` suite.
-- Rewritten `docs/atlas-setup.md` using `sample_airbnb`.
+- Rewritten `docs/atlas-setup.md` using `sample_mflix`.
 - `docs/HANDOFF.md` bullet relocation.
 - This design spec.
 

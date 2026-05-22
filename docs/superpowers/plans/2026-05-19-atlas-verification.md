@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Live-test every Atlas-only code path against a real M0 cluster on `sample_airbnb.listingsAndReviews`, codify each path as a regression test under `tests/integration/atlas/`, and update `docs/HANDOFF.md` to reflect "live-tested on Atlas".
+**Goal:** Live-test every Atlas-only code path against a real M0 cluster on `sample_mflix.embedded_movies`, codify each path as a regression test under `tests/integration/atlas/`, and update `docs/HANDOFF.md` to reflect "live-tested on Atlas".
 
 **Architecture:** New env-gated test directory (`MONGOSEMANTIC_RUN_ATLAS_INTEGRATION=1` + `MONGOSEMANTIC_ATLAS_URI`) with module-scoped fixtures for Atlas client, topology assertion, sample-dataset preflight, and search-index readiness polling. One orchestrated test file per Atlas-only path. Bugs trigger an isolated per-issue feature branch with a failing-test-first regression covered before merge.
 
@@ -164,12 +164,12 @@ def atlas_topology(atlas_client: MongoClient, atlas_uri: str) -> Topology:
 
 @pytest.fixture(scope="session")
 def atlas_db_name() -> str:
-    return "sample_airbnb"
+    return "sample_mflix"
 
 
 @pytest.fixture(scope="session")
 def atlas_collection_name() -> str:
-    return "listingsAndReviews"
+    return "movies"
 
 
 @pytest.fixture(scope="session")
@@ -261,7 +261,7 @@ Atlas console -> Network Access -> Add IP Address -> "Add Current IP".
 - [ ] **Step 4: User loads the sample dataset**
 
 Atlas console -> Database -> cluster (`mongosemantic-test`) -> "..." menu -> Load Sample Dataset.
-Wait ~2 minutes for `sample_airbnb`, `sample_mflix`, etc. to populate.
+Wait ~2 minutes for `sample_mflix`, `sample_mflix`, etc. to populate.
 
 - [ ] **Step 5: User grabs the connection URI**
 
@@ -282,7 +282,7 @@ export MONGOSEMANTIC_RUN_ATLAS_INTEGRATION=1
 
 ```bash
 MONGOSEMANTIC_URI="$MONGOSEMANTIC_ATLAS_URI" \
-MONGOSEMANTIC_DB=sample_airbnb \
+MONGOSEMANTIC_DB=sample_mflix \
 MONGOSEMANTIC_MODEL=local-fast \
 mongosemantic status
 ```
@@ -363,7 +363,7 @@ def test_smoke_apply_index_worker_search(
 
     # Search — even with partial embedding coverage, top-k should return hits.
     r = runner.invoke(app, [
-        "search", "cozy apartment near the beach",
+        "search", "heist gone wrong",
         "--collection", atlas_collection_name,
         "--limit", "3",
     ])
@@ -397,7 +397,7 @@ git commit -m "test(atlas): tier 1 smoke — connectivity, topology, apply/index
 **Files:**
 - Create: `tests/integration/atlas/test_vector_search.py`
 
-Re-apply to shadow multi-field on `summary,description`. Wait for the vector index to become queryable, then verify scores fall in the cosine range and result count > 0.
+Re-apply to shadow multi-field on `title,plot`. Wait for the vector index to become queryable, then verify scores fall in the cosine range and result count > 0.
 
 - [ ] **Step 1: Write `tests/integration/atlas/test_vector_search.py`**
 
@@ -452,7 +452,7 @@ def test_vector_search_multi_field(
 
     # Search and assert atlas-side ranking shape.
     r = runner.invoke(app, [
-        "search", "cozy apartment near the beach",
+        "search", "heist gone wrong",
         "--collection", atlas_collection_name,
         "--limit", "5",
     ])
@@ -616,7 +616,7 @@ git commit -m "test(atlas): tier 4 \$rankFusion hybrid path with 8.0 fallback br
 **Files:**
 - Create: `tests/integration/atlas/test_chunked_inline.py`
 
-Two scenarios in one orchestrated test: (a) re-apply with `--chunked` on `house_rules`, verify multiple `_chunks` per source doc; (b) re-apply with `--mode inline` on `neighborhood_overview`, verify embeddings written under `_msem.{field}`.
+Two scenarios in one orchestrated test: (a) re-apply with `--chunked` on `fullplot`, verify multiple `_chunks` per source doc; (b) re-apply with `--mode inline` on `plot`, verify embeddings written under `_msem.{field}`.
 
 - [ ] **Step 1: Write `tests/integration/atlas/test_chunked_inline.py`**
 
@@ -777,7 +777,7 @@ def test_migration_carries_over_indexes(
     for _ in range(20):
         process_batch(db, provider, "atlas-tier6-pre", 64)
 
-    query = "cozy apartment near the beach"
+    query = "heist gone wrong"
     pre_top = _top_hit_id(runner, atlas_collection_name, query)
 
     # Run the migration.
@@ -838,7 +838,7 @@ This tier doesn't get codified — it's eyeball checks against the UI.
 
 ```bash
 MONGOSEMANTIC_URI="$MONGOSEMANTIC_ATLAS_URI" \
-MONGOSEMANTIC_DB=sample_airbnb \
+MONGOSEMANTIC_DB=sample_mflix \
 MONGOSEMANTIC_MODEL=local-fast \
 mongosemantic ui --port 8081
 ```
@@ -850,7 +850,7 @@ Open <http://127.0.0.1:8081>.
 For each, capture pass/fail in a notes file or PR description:
 
 1. Connection page reports **Atlas cluster** (not replica set / standalone).
-2. Collections page lists `listingsAndReviews` with its configured mode.
+2. Collections page lists `embedded_movies` with its configured mode.
 3. Search page returns results at Atlas latencies (50–150 ms displayed).
 4. Hybrid toggle: search runs, no amber fallback banner (assuming 8.1+).
 5. Visualize page renders airbnb embeddings; sample-size dropdown works.
@@ -869,12 +869,12 @@ If any screen fails: jump to "Per-bug PR workflow".
 
 ## Phase D — Documentation updates
 
-### Task 11: Rewrite `docs/atlas-setup.md` for sample_airbnb
+### Task 11: Rewrite `docs/atlas-setup.md` for sample_mflix
 
 **Files:**
 - Modify: `docs/atlas-setup.md`
 
-The current runbook references `seed_demo.py` and three collections (articles/products/recipes). Rewrite to use the Atlas "Load Sample Dataset" flow and `sample_airbnb.listingsAndReviews`.
+The current runbook references `seed_demo.py` and three collections (articles/products/recipes). Rewrite to use the Atlas "Load Sample Dataset" flow and `sample_mflix.embedded_movies`.
 
 - [ ] **Step 1: Replace section 5 (seed) and section 6 (apply+index)**
 
@@ -884,17 +884,17 @@ Open `docs/atlas-setup.md`. Replace section "## 5. Seed the demo data into Atlas
 ## 5. Load the sample dataset
 
 In the Atlas console: **Database** -> your cluster -> **"..."** -> **Load Sample Dataset**.
-Wait ~2 minutes. This populates `sample_airbnb`, `sample_mflix`, and several other databases — we'll use `sample_airbnb.listingsAndReviews` (5,555 vacation rental listings, ~40 MB).
+Wait ~2 minutes. This populates `sample_mflix`, `sample_mflix`, and several other databases — we'll use `sample_mflix.embedded_movies` (3,483 curated movie records, ~40 MB).
 
 ```bash
-export MONGOSEMANTIC_DB=sample_airbnb
+export MONGOSEMANTIC_DB=sample_mflix
 ```
 
 ## 6. Apply + index
 
 ```bash
-mongosemantic apply -c listingsAndReviews -f summary -f description
-mongosemantic index -c listingsAndReviews
+mongosemantic apply -c movies -f summary -f description
+mongosemantic index -c movies
 mongosemantic worker --once
 ```
 
@@ -908,17 +908,17 @@ Both indexes take **30–90 seconds** to come online. The CLI returns immediatel
 
 - [ ] **Step 2: Update section 7 query examples to use airbnb fields**
 
-Find each `mongosemantic search` example in section 7. Update the `-c articles` references to `-c listingsAndReviews` and use natural-language queries that match airbnb listings (e.g., "cozy apartment near the beach", "family-friendly with a kitchen", "downtown studio with rooftop").
+Find each `mongosemantic search` example in section 7. Update the `-c embedded_movies` references to `-c movies` and use natural-language queries that match airbnb listings (e.g., "heist gone wrong", "robots questioning their existence", "dystopian future government").
 
 - [ ] **Step 3: Update the migration example in section 7**
 
 Replace the `migrate -c recipes` example with:
 
 ```bash
-mongosemantic migrate -c listingsAndReviews -m local-better
+mongosemantic migrate -c movies -m local-better
 ```
 
-Update the verification bullets to reference `listingsAndReviews_embeddings_archive_<ts>`.
+Update the verification bullets to reference `movies_embeddings_archive_<ts>`.
 
 - [ ] **Step 4: Add a "Verified via test suite" section**
 
@@ -944,7 +944,7 @@ Tier 7 (UI) is manual.
 
 ```bash
 git add docs/atlas-setup.md
-git commit -m "docs(atlas): rewrite runbook for sample_airbnb + add automated-suite pointer"
+git commit -m "docs(atlas): rewrite runbook for sample_mflix + add automated-suite pointer"
 ```
 
 ---
@@ -965,7 +965,7 @@ In `docs/HANDOFF.md`, delete the entire section starting at `## What's working b
 In the "What's working (live-tested)" section, append these bullets to the existing list:
 
 ```markdown
-- **Atlas `$vectorSearch`** end-to-end on `sample_airbnb.listingsAndReviews`
+- **Atlas `$vectorSearch`** end-to-end on `sample_mflix.embedded_movies`
 - **Atlas `$search` (BM25)** index creation + queryability
 - **Atlas `$rankFusion` hybrid** (with documented 8.0 fallback)
 - **Atlas migration** with vector + search index carry-over after atomic rename
@@ -1090,7 +1090,7 @@ git push -u origin feat/atlas-verification
 gh pr create --title "Atlas verification: live-tested + codified as pytest suite" --body "$(cat <<'EOF'
 ## Summary
 
-- Live-tests every Atlas-only path (`$vectorSearch`, `$search`, `$rankFusion`, migration carry-over) against an M0 cluster on `sample_airbnb.listingsAndReviews`.
+- Live-tests every Atlas-only path (`$vectorSearch`, `$search`, `$rankFusion`, migration carry-over) against an M0 cluster on `sample_mflix.embedded_movies`.
 - Codifies the verification as `tests/integration/atlas/` (7 tests, env-gated on `MONGOSEMANTIC_RUN_ATLAS_INTEGRATION=1`).
 - Rewrites `docs/atlas-setup.md` to use the Atlas "Load Sample Dataset" flow.
 - Moves the four flagged paths in `docs/HANDOFF.md` from "not live-tested" to "working".
