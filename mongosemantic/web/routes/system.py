@@ -44,10 +44,23 @@ def _redact(uri: str) -> str:
     if "@" not in uri:
         return uri
     scheme, rest = uri.split("://", 1)
-    creds, host = rest.split("@", 1)
+    creds, host = rest.rsplit("@", 1)
     if ":" in creds:
         return f"{scheme}://<redacted>@{host}"
     return uri  # no creds to redact
+
+
+def _scrub(details: str, uri: str) -> str:
+    """Replace a known URI inside arbitrary exception text with its redacted form.
+
+    Defends against PyMongo exception reprs that may echo back the URI we
+    passed in. Empirically the current PyMongo versions don't do this for the
+    error paths we map, but the cost of the scrub is trivial and the cost of
+    a credentials leak is high.
+    """
+    if not uri or uri not in details:
+        return details
+    return details.replace(uri, _redact(uri))
 
 
 def _env_overrides() -> dict:
@@ -58,14 +71,14 @@ def _env_overrides() -> dict:
     }
 
 
-def _err(err: ConnectionError) -> dict:
+def _err(err: ConnectionError, uri: str = "") -> dict:
     return {
         "ok": False,
         "error": {
             "code": err.code,
             "message": err.message,
             "hint": err.hint,
-            "details": err.details,
+            "details": _scrub(err.details, uri),
         },
     }
 
@@ -146,7 +159,7 @@ def save_connection(req: SaveRequest) -> dict:
     try:
         conn = MongoConnection.open(req.uri, req.database)
     except Exception as exc:  # noqa: BLE001
-        return _err(map_exception(exc))
+        return _err(map_exception(exc), uri=req.uri)
 
     try:
         info = conn.client.server_info()
@@ -181,7 +194,7 @@ def test_connection() -> dict:
     try:
         conn = MongoConnection.open(settings.uri, settings.database)
     except Exception as exc:  # noqa: BLE001
-        return _err(map_exception(exc))
+        return _err(map_exception(exc), uri=settings.uri)
     try:
         info = conn.client.server_info()
     finally:

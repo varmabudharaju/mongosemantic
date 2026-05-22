@@ -229,3 +229,30 @@ def test_connection_config_path(monkeypatch, isolated_xdg):
     body = r.json()
     assert body["path"].endswith("mongosemantic/config.json")
     assert str(isolated_xdg) in body["path"]
+
+
+def test_save_failure_scrubs_uri_from_details(monkeypatch, isolated_xdg):
+    client = _client_no_env(monkeypatch)
+    token, headers = _csrf(client)
+    from pymongo.errors import OperationFailure
+
+    # Construct an exception whose repr embeds the URI (defensive worst-case).
+    leaky_uri = "mongodb+srv://leakuser:leakpass@evil.example.net/"
+
+    def fake_open(uri, db):
+        raise OperationFailure(f"auth failed against {uri}", code=18)
+
+    with patch(
+        "mongosemantic.web.routes.system.MongoConnection.open",
+        side_effect=fake_open,
+    ):
+        r = client.post(
+            "/api/connection/save",
+            json={"uri": leaky_uri, "database": "x"},
+            headers=headers,
+        )
+    body = r.json()
+    assert body["ok"] is False
+    # Raw URI (with password) must not appear anywhere in the response.
+    assert "leakpass" not in r.text
+    assert "leakuser:leakpass" not in r.text
