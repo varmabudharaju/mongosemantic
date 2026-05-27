@@ -40,7 +40,7 @@ def test_search_returns_rows(monkeypatch):
          "chunk_index": 0, "chunk_text": "match me", "score": 0.97},
     ]
     with patch("mongosemantic.web.routes.search.MongoConnection.open", return_value=_conn(db)), \
-         patch("mongosemantic.web.routes.search.get_provider", return_value=fake_provider), \
+         patch.object(client.app.state.providers, "get", return_value=fake_provider), \
          patch("mongosemantic.web.routes.search._run_one", return_value=fake_rows):
         r = client.get("/api/search?q=hello&collection=articles&limit=10")
         assert r.status_code == 200
@@ -83,7 +83,7 @@ def test_search_serializes_doc_with_bson_binary_field(monkeypatch):
         },
     }]
     with patch("mongosemantic.web.routes.search.MongoConnection.open", return_value=_conn(db)), \
-         patch("mongosemantic.web.routes.search.get_provider", return_value=fake_provider), \
+         patch.object(client.app.state.providers, "get", return_value=fake_provider), \
          patch("mongosemantic.web.routes.search._run_one", return_value=fake_rows):
         r = client.get("/api/search?q=heists&collection=movies&limit=5")
     assert r.status_code == 200, r.text
@@ -134,7 +134,7 @@ def test_search_stringifies_bson_scalars(monkeypatch):
         },
     }]
     with patch("mongosemantic.web.routes.search.MongoConnection.open", return_value=_conn(db)), \
-         patch("mongosemantic.web.routes.search.get_provider", return_value=fake_provider), \
+         patch.object(client.app.state.providers, "get", return_value=fake_provider), \
          patch("mongosemantic.web.routes.search._run_one", return_value=fake_rows):
         r = client.get("/api/search?q=x&collection=movies&limit=5")
     assert r.status_code == 200, r.text
@@ -172,7 +172,7 @@ def test_search_recurses_into_subdocs_to_drop_binary(monkeypatch):
         },
     }]
     with patch("mongosemantic.web.routes.search.MongoConnection.open", return_value=_conn(db)), \
-         patch("mongosemantic.web.routes.search.get_provider", return_value=fake_provider), \
+         patch.object(client.app.state.providers, "get", return_value=fake_provider), \
          patch("mongosemantic.web.routes.search._run_one", return_value=fake_rows):
         r = client.get("/api/search?q=x&collection=movies&limit=5")
     assert r.status_code == 200, r.text
@@ -188,6 +188,6 @@ def test_search_rejects_unconfigured(monkeypatch):
     fake_provider = MagicMock()
     fake_provider.embed = lambda q: np.array([1.0, 0.0, 0.0], dtype=np.float32)
     with patch("mongosemantic.web.routes.search.MongoConnection.open", return_value=_conn(db)), \
-         patch("mongosemantic.web.routes.search.get_provider", return_value=fake_provider):
+         patch.object(client.app.state.providers, "get", return_value=fake_provider):
         r = client.get("/api/search?q=hello&collection=missing")
         assert r.status_code == 400

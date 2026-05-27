@@ -48,15 +48,19 @@ class _RunningWorker:
     Owns a polling thread for standalone topologies.
     """
 
-    def __init__(self, conn: MongoConnection, identity: _Identity) -> None:
+    def __init__(
+        self,
+        conn: MongoConnection,
+        identity: _Identity,
+        registry: ProviderRegistry,
+    ) -> None:
         self.conn = conn
         self.identity = identity
-        # Use a per-model registry so each collection's jobs are embedded
-        # with the model that was configured for it. The supervisor still
-        # restarts the worker on connection change, but model changes
-        # within a connection are now handled lazily, per job.
+        # Per-model registry shared with the web app: the worker and the
+        # search route use the same SentenceTransformer instance, loaded
+        # exactly once per process.
         ensure_indexes(conn.db)
-        self.runner = WorkerRunner(conn.db, ProviderRegistry())
+        self.runner = WorkerRunner(conn.db, registry)
         self.runner_thread = threading.Thread(
             target=self.runner.run, name="embed-worker", daemon=True
         )
@@ -117,10 +121,19 @@ class EmbeddedWorkerSupervisor:
 
     Call .start() once from the UI process. The supervisor runs as a
     daemon thread so it dies with the process — no shutdown hook needed.
+
+    Pass `registry` to share an embedding-provider cache with the web
+    app (so worker and search use the same SentenceTransformer). If
+    omitted, the supervisor owns its own registry.
     """
 
-    def __init__(self, check_interval: float = CHECK_INTERVAL_S) -> None:
+    def __init__(
+        self,
+        check_interval: float = CHECK_INTERVAL_S,
+        registry: ProviderRegistry | None = None,
+    ) -> None:
         self._check_interval = check_interval
+        self._registry = registry or ProviderRegistry()
         self._stop = threading.Event()
         self._thread = threading.Thread(
             target=self._run, name="embed-supervisor", daemon=True
@@ -173,7 +186,7 @@ class EmbeddedWorkerSupervisor:
             log.warning("embedded worker: cannot connect yet (%s); will retry", e)
             return
         try:
-            running = _RunningWorker(conn, identity)
+            running = _RunningWorker(conn, identity, self._registry)
             running.start()
             self._running = running
             log.info("embedded worker started against %s/%s", identity.uri, identity.database)

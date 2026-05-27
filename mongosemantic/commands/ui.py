@@ -27,22 +27,12 @@ def ui_cmd(
             f"This UI has no built-in auth — put it behind your own auth proxy.[/yellow]"
         )
     console.print(f"[green]mongosemantic UI → http://{host}:{port}[/green]")
-    # Start the embedded worker before uvicorn blocks. The supervisor handles
-    # the "no connection configured yet" case by retrying on a timer, so it
-    # is safe to start before the user has set up a connection in the UI.
-    # In reload mode, uvicorn forks a child process and the parent's threads
-    # don't survive the fork — skip the embedded worker to avoid a confusing
-    # dead-thread silence; advanced users on --reload likely run `worker` too.
-    if not no_worker and not reload:
-        supervisor = EmbeddedWorkerSupervisor()
-        supervisor.start()
-        console.print("[green]Embedded worker running in background.[/green]")
-    elif not no_worker and reload:
-        console.print(
-            "[yellow]--reload skips the embedded worker. "
-            "Run `mongosemantic worker` in another terminal.[/yellow]"
-        )
     if reload:
+        if not no_worker:
+            console.print(
+                "[yellow]--reload skips the embedded worker. "
+                "Run `mongosemantic worker` in another terminal.[/yellow]"
+            )
         uvicorn.run(
             "mongosemantic.web.app:create_app",
             host=host,
@@ -50,6 +40,13 @@ def ui_cmd(
             reload=True,
             factory=True,
         )
-    else:
-        app = create_app()
-        uvicorn.run(app, host=host, port=port)
+        return
+    # Build the app first so we can hand its provider cache to the embedded
+    # worker — worker and search end up sharing one SentenceTransformer
+    # instance per process instead of each loading their own.
+    app = create_app()
+    if not no_worker:
+        supervisor = EmbeddedWorkerSupervisor(registry=app.state.providers)
+        supervisor.start()
+        console.print("[green]Embedded worker running in background.[/green]")
+    uvicorn.run(app, host=host, port=port)

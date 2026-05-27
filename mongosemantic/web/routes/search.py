@@ -6,12 +6,11 @@ from decimal import Decimal
 from uuid import UUID
 
 from bson import ObjectId
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from mongosemantic.commands.search import _run_one, hybrid_available, run_one_hybrid
 from mongosemantic.config import Settings
 from mongosemantic.db.client import MongoConnection
-from mongosemantic.embeddings.provider import get_provider
 from mongosemantic.search.cross_collection import min_max_normalize, per_collection_targets
 from mongosemantic.state import load_config
 from mongosemantic.web.identifiers import IdentifierError, validate_identifier
@@ -83,6 +82,7 @@ def _serialize(row: dict) -> dict:
 
 @router.get("/api/search")
 def search(
+    request: Request,
     q: str = Query(..., min_length=1, max_length=2000),
     collection: str | None = Query(None),
     limit: int = Query(10, ge=1, le=100),
@@ -103,11 +103,21 @@ def search(
 
         # Embed the query with the collection's *own* model — not the
         # global default. Otherwise after a migration the dims mismatch
-        # and the search returns noise.
+        # and the search returns noise. The provider is fetched from a
+        # process-wide registry so the SentenceTransformer is loaded once
+        # per process instead of once per request.
+        providers = request.app.state.providers
         qvec_cache: dict[str, list[float]] = {}
         def _qvec(model: str) -> list[float]:
             if model not in qvec_cache:
-                qvec_cache[model] = get_provider(model).embed(q).tolist()
+                prov = providers.get(model)
+                if prov is None:
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"embedding provider for {model!r} unavailable: "
+                               f"{providers.reason(model)}",
+                    )
+                qvec_cache[model] = prov.embed(q).tolist()
             return qvec_cache[model]
 
         def _run(cfg, name):

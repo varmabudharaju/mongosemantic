@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 
 from mongosemantic import __version__
 from mongosemantic.web.content import CONTENT
+from mongosemantic.worker.runner import ProviderRegistry
 from mongosemantic.web.routes import aggregation as _aggregation_routes
 from mongosemantic.web.routes import apply as _apply_routes
 from mongosemantic.web.routes import collections as _collections_routes
@@ -33,6 +34,11 @@ def create_app() -> FastAPI:
     install_security_headers(app)
     install_rate_limit(app, limit=120, window_seconds=60)
     install_csrf(app)
+    # Process-wide embedding-provider cache. Routes that need to embed
+    # query text (and the embedded worker) read this off app.state so the
+    # SentenceTransformer / OpenAI client is loaded exactly once per
+    # process instead of once per request.
+    app.state.providers = ProviderRegistry()
 
     @app.get("/healthz")
     def _healthz() -> JSONResponse:

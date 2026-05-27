@@ -27,30 +27,46 @@ log = logging.getLogger("mongosemantic.worker")
 
 
 class ProviderRegistry:
-    """Lazy, per-model provider cache used by `process_batch`.
+    """Lazy, per-model provider cache used by `process_batch` and the web
+    search endpoint.
 
     A worker can process jobs across collections that use different
     embedding models. Loading providers lazily (and remembering which
     ones failed to load) keeps a missing OpenAI key or unreachable
     Ollama from stopping work on the models that *do* work.
+
+    Thread-safe: protects load attempts with a per-instance lock so
+    concurrent first-time requests for the same model don't both spend
+    seconds loading it.
     """
 
     def __init__(self) -> None:
         self._cache: dict[str, EmbeddingProvider] = {}
         self._failed: dict[str, str] = {}  # model_key → reason
+        self._lock = threading.Lock()
 
     def get(self, model_key: str) -> EmbeddingProvider | None:
-        if model_key in self._cache:
-            return self._cache[model_key]
+        # Fast path — no lock when already cached or known-bad.
+        cached = self._cache.get(model_key)
+        if cached is not None:
+            return cached
         if model_key in self._failed:
             return None
-        try:
-            self._cache[model_key] = get_provider(model_key)
-            return self._cache[model_key]
-        except Exception as e:
-            log.exception("failed to load provider for model %r", model_key)
-            self._failed[model_key] = str(e)
-            return None
+        with self._lock:
+            # Re-check under the lock in case another thread won the race.
+            cached = self._cache.get(model_key)
+            if cached is not None:
+                return cached
+            if model_key in self._failed:
+                return None
+            try:
+                provider = get_provider(model_key)
+            except Exception as e:
+                log.exception("failed to load provider for model %r", model_key)
+                self._failed[model_key] = str(e)
+                return None
+            self._cache[model_key] = provider
+            return provider
 
     def reason(self, model_key: str) -> str:
         return self._failed.get(model_key, "unknown error")
