@@ -814,6 +814,10 @@
       // then stop; the user can re-render by re-navigating to this page.
       const stillWorking = pending > 0 || inflight > 0;
       const nextDelay = stillWorking ? 1500 : 4000;
+      // Surface the Re-index button once the queue idles so the user
+      // always has an obvious affordance for a fresh sweep.
+      const btn = document.getElementById("indexing-reindex-btn");
+      if (btn) btn.hidden = stillWorking;
       // Stop polling entirely after 3 idle ticks so we don't keep a hot
       // loop running on a page the user left open.
       if (!stillWorking) {
@@ -1086,25 +1090,68 @@
       const bar = $("#indexing-progress");
       const metric = $("#indexing-metric");
       const eta = $("#indexing-eta");
+      const reindexBtn = $("#indexing-reindex-btn");
       bar.max = 1; bar.value = 0;
-      metric.textContent = "Enqueueing…";
       eta.textContent = "";
-      // 1) Synchronously enqueue, like before. The POST returns once every
-      //    job is in the queue.
-      let enqueued = 0, totalDocs = 0;
+      reindexBtn.hidden = true;
+
+      // Manual re-enqueue handler. Surface "Re-index now" whenever the
+      // collection is in a steady state (idle or fully done) so power
+      // users can force a sweep without leaving the page.
+      const reindex = async () => {
+        reindexBtn.disabled = true;
+        reindexBtn.textContent = "Enqueueing…";
+        try {
+          const r = await fetchJson("POST", `/api/collections/${encodeURIComponent(name)}/index`);
+          toast(CONTENT.indexing.toast_complete.replace("{n}", r.enqueued || 0));
+          _startIndexingPolling(name);
+        } catch (e) {
+          toast(e.message);
+        } finally {
+          reindexBtn.disabled = false;
+          reindexBtn.textContent = "Re-index now";
+        }
+      };
+      reindexBtn.onclick = reindex;
+
+      // Status-first: peek at the queue before doing anything destructive.
+      // Three regimes:
+      //   1. Work in flight → just monitor it (polling).
+      //   2. Nothing in queue + nothing done → first-ever visit; auto-enqueue.
+      //   3. Already finished (done > 0, queue idle) → show the state and
+      //      offer Re-index. No surprise re-enqueue every page visit.
+      metric.textContent = "Checking status…";
+      let initial;
       try {
-        const r = await fetchJson("POST", `/api/collections/${encodeURIComponent(name)}/index`);
-        enqueued = r.enqueued || 0;
-        totalDocs = r.total || 0;
-        toast(CONTENT.indexing.toast_complete.replace("{n}", enqueued));
+        initial = await fetchJson(
+          "GET",
+          `/api/indexing/status?collection=${encodeURIComponent(name)}`
+        );
       } catch (e) {
-        toast(e.message);
-        metric.textContent = "Enqueueing failed: " + e.message;
+        metric.textContent = "Status fetch failed: " + e.message;
         return;
       }
-      // 2) Poll /api/indexing/status until the queue drains, rendering
-      //    tiles, per-field breakdown, recent feed, and failed-jobs panel.
-      _startIndexingPolling(name, totalDocs);
+      const t = initial.totals || {};
+      const busy = (t.pending || 0) > 0 || (t.in_flight || 0) > 0;
+      const idleAlreadyDone = !busy && (t.completed || 0) > 0;
+      const neverIndexed = !busy && (t.completed || 0) === 0 && (t.failed || 0) === 0;
+
+      if (busy) {
+        // Just attach to the in-progress run.
+        _startIndexingPolling(name);
+      } else if (idleAlreadyDone) {
+        // Show the steady state without enqueueing. Render tiles + feed
+        // off the initial payload by running one tick of the renderer.
+        reindexBtn.hidden = false;
+        _startIndexingPolling(name);
+      } else if (neverIndexed) {
+        // First-ever visit (typically arriving from Apply). Auto-enqueue.
+        await reindex();
+      } else {
+        // Has failures but no pending — show what we have, offer re-index.
+        reindexBtn.hidden = false;
+        _startIndexingPolling(name);
+      }
     },
 
     // -- Indexing page polling + render ---------------------------------

@@ -231,7 +231,11 @@
         </ol>
       </aside>
       <div class="card" style="padding:24px">
-        <p id="indexing-metric"></p>
+        <div class="indexing-headline">
+          <p id="indexing-metric" style="margin:0"></p>
+          <button type="button" id="indexing-reindex-btn" class="indexing-reindex"
+                  hidden>Re-index now</button>
+        </div>
         <progress id="indexing-progress" value="0" max="0"></progress>
         <p id="indexing-eta" class="indexing-eta"></p>
       </div>

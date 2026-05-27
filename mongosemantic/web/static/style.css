@@ -1050,6 +1050,25 @@ pre#query-results {
   color: var(--mdb-ink-muted);
   font-family: var(--font-mono);
 }
+.indexing-headline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.indexing-reindex {
+  padding: 6px 14px;
+  font-size: 13px;
+  background: var(--mdb-leaf, #13aa52);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  margin: 0;
+}
+.indexing-reindex:hover { background: var(--mdb-forest, #00684A); }
+.indexing-reindex:disabled { opacity: 0.6; cursor: not-allowed; }
 .indexing-tiles {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
