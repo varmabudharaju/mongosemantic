@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import typer
 from dotenv import load_dotenv
 
@@ -10,6 +12,33 @@ app = typer.Typer(
 )
 
 load_dotenv()  # pick up .env if present
+
+
+@app.callback()
+def _root(
+    uri: str = typer.Option(
+        None,
+        "--uri",
+        help="MongoDB connection URI. Overrides MONGOSEMANTIC_URI and the saved "
+             "config. Must start with mongodb:// or mongodb+srv://.",
+    ),
+    db: str = typer.Option(
+        None,
+        "--db",
+        help="Database name. Overrides MONGOSEMANTIC_DB and the saved config.",
+    ),
+) -> None:
+    # Flags take precedence over env / saved file. Set env so every downstream
+    # Settings() / Settings.from_environment() call picks them up uniformly.
+    # --uri and --db must be used together — partial input is a clearer error
+    # here than a confusing precedence mix deep inside Settings.
+    if (uri is None) ^ (db is None):
+        missing = "--db" if uri else "--uri"
+        raise typer.BadParameter(f"{missing} is required when the other is set.")
+    if uri:
+        os.environ["MONGOSEMANTIC_URI"] = uri
+    if db:
+        os.environ["MONGOSEMANTIC_DB"] = db
 
 from mongosemantic.commands import apply as _apply_mod  # noqa: E402
 from mongosemantic.commands import index as _index_mod  # noqa: E402
