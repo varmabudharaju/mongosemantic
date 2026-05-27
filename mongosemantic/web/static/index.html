@@ -223,16 +223,56 @@
       <h2 id="indexing-title"></h2>
       <p  data-content="indexing.subtitle"></p>
       <aside class="page-help">
-        <strong>How to use</strong>
+        <strong>What you're seeing</strong>
         <ol>
-          <li>The bar tracks docs whose embed jobs have been enqueued, not necessarily completed.</li>
-          <li>A worker (<code>mongosemantic worker</code> from a terminal) actually computes the embeddings.</li>
-          <li>You can leave this page — indexing runs in the background. Check the Dashboard for queue depth.</li>
+          <li><strong>Enqueueing</strong> writes one embed job per (document, field, chunk). It's fast and synchronous.</li>
+          <li>The <strong>embedded worker</strong> drains the queue in the background — you can leave this page, the work continues.</li>
+          <li>This page polls every 1.5 s so you can watch progress, throughput, and any failures live.</li>
         </ol>
       </aside>
       <div class="card" style="padding:24px">
-        <progress id="indexing-progress" value="0" max="0"></progress>
         <p id="indexing-metric"></p>
+        <progress id="indexing-progress" value="0" max="0"></progress>
+        <p id="indexing-eta" class="indexing-eta"></p>
+      </div>
+      <div id="indexing-tiles" class="indexing-tiles" hidden>
+        <div class="indexing-tile">
+          <span class="tile-label">Completed</span>
+          <strong class="tile-value" id="tile-completed">—</strong>
+        </div>
+        <div class="indexing-tile">
+          <span class="tile-label">In flight</span>
+          <strong class="tile-value" id="tile-inflight">—</strong>
+        </div>
+        <div class="indexing-tile">
+          <span class="tile-label">Pending</span>
+          <strong class="tile-value" id="tile-pending">—</strong>
+        </div>
+        <div class="indexing-tile">
+          <span class="tile-label">Failed</span>
+          <strong class="tile-value indexing-tile-bad" id="tile-failed">—</strong>
+        </div>
+        <div class="indexing-tile indexing-tile-wide">
+          <span class="tile-label">Worker</span>
+          <strong class="tile-value">
+            <span id="tile-worker-dot" class="worker-dot"></span>
+            <span id="tile-worker-text">—</span>
+          </strong>
+        </div>
+      </div>
+      <div id="indexing-by-field" class="indexing-panel" hidden>
+        <h3 class="indexing-section-title">Per-field progress</h3>
+        <div class="table-wrap"><table id="indexing-field-table"></table></div>
+      </div>
+      <div id="indexing-failed-panel" class="indexing-panel indexing-failed" hidden>
+        <h3 class="indexing-section-title">Failed jobs <span id="indexing-failed-count" class="indexing-failed-count"></span></h3>
+        <p class="indexing-section-hint">These jobs hit max attempts. Inspect the error and rerun <code>retry</code> from CLI or the dashboard.</p>
+        <div id="indexing-failed-list"></div>
+      </div>
+      <div id="indexing-feed-panel" class="indexing-panel" hidden>
+        <h3 class="indexing-section-title">Recent activity</h3>
+        <p class="indexing-section-hint">Most recent completed and failed jobs. Newest on top.</p>
+        <ul id="indexing-feed" class="indexing-feed"></ul>
       </div>
     </section>
 

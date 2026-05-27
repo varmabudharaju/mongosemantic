@@ -167,6 +167,58 @@ def count_by_collection(db: Database) -> dict[str, dict[str, int]]:
     return out
 
 
+def count_by_field(db: Database, collection: str) -> dict[str, dict[str, int]]:
+    """Per-field status counts for one collection. Powers the indexing
+    page's per-field breakdown so operators can spot one field stalled
+    while the others finish."""
+    out: dict[str, dict[str, int]] = {}
+    for row in db[JOBS_COLLECTION].aggregate([
+        {"$match": {"collection": collection}},
+        {"$group": {
+            "_id": {"field": "$field_path", "status": "$status"},
+            "n": {"$sum": 1},
+        }}
+    ]):
+        field = row["_id"]["field"] or "<unknown>"
+        status = row["_id"]["status"]
+        out.setdefault(field, {})[status] = row["n"]
+    return out
+
+
+def recent_jobs(db: Database, collection: str, limit: int = 20) -> list[dict]:
+    """Mixed recent-activity feed for one collection: completed + failed
+    jobs ordered by whichever timestamp is most recent. Lets the indexing
+    page show a live log instead of just numbers."""
+    cursor = (
+        db[JOBS_COLLECTION]
+        .find(
+            {
+                "collection": collection,
+                "status": {"$in": ["completed", "failed"]},
+            },
+            {
+                "status": 1, "field_path": 1, "source_id": 1, "chunk_index": 1,
+                "completed_at": 1, "enqueued_at": 1, "last_error": 1, "attempts": 1,
+            },
+        )
+        .sort("completed_at", -1)
+        .limit(limit)
+    )
+    return [
+        {
+            "status": d.get("status"),
+            "field_path": d.get("field_path"),
+            "source_id": str(d.get("source_id")) if d.get("source_id") is not None else None,
+            "chunk_index": d.get("chunk_index"),
+            "completed_at": d.get("completed_at"),
+            "enqueued_at": d.get("enqueued_at"),
+            "last_error": d.get("last_error"),
+            "attempts": d.get("attempts"),
+        }
+        for d in cursor
+    ]
+
+
 def recent_failed_jobs(db: Database, limit: int = 10) -> list[dict]:
     """Most recently failed jobs, with the last_error message — for surfacing
     in `status` and the dashboard so failures are actionable, not just a count."""

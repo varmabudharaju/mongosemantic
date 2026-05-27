@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from mongosemantic.config import Settings
 from mongosemantic.db.client import MongoConnection
 from mongosemantic.state import (
     count_by_collection,
+    count_by_field,
     count_by_status,
     delete_config,
     ensure_indexes,
@@ -14,6 +15,7 @@ from mongosemantic.state import (
     list_heartbeats,
     load_config,
     recent_failed_jobs,
+    recent_jobs,
     reset_failed,
 )
 from mongosemantic.sync.enqueue import enqueue_for_doc
@@ -100,6 +102,97 @@ def jobs_status() -> dict:
                 "jobs_processed": latest.jobs_processed,
             }
         return {"jobs": count_by_status(conn.db), "worker": worker}
+    finally:
+        conn.close()
+
+
+@router.get("/api/indexing/status")
+def indexing_status(
+    collection: str = Query(..., min_length=1, max_length=128),
+    recent_limit: int = Query(15, ge=1, le=100),
+) -> dict:
+    """One-shot status payload for the Indexing page: totals, per-field
+    breakdown, latest worker heartbeat, recent activity feed, and a sample
+    of failed jobs. Designed to be polled every ~1-2s while there's work.
+    """
+    settings = Settings.from_environment()
+    conn = MongoConnection.open(settings.uri, settings.database)
+    try:
+        db = conn.db
+        # Per-status totals scoped to this collection (count_by_collection
+        # returns a {collection: {status: n}} map, so we just project it).
+        per_coll = count_by_collection(db)
+        totals = per_coll.get(collection, {})
+        completed = totals.get("completed", 0)
+        pending = totals.get("pending", 0)
+        in_flight = totals.get("in_flight", 0)
+        failed = totals.get("failed", 0)
+        total = completed + pending + in_flight + failed
+
+        # Worker heartbeat — same shape as /api/jobs/status so the UI can
+        # reuse its liveness logic.
+        latest = None
+        for hb in list_heartbeats(db):
+            if latest is None or hb.last_heartbeat > latest.last_heartbeat:
+                latest = hb
+        worker = (
+            {
+                "worker_id": latest.worker_id,
+                "last_heartbeat": latest.last_heartbeat.isoformat(),
+                "jobs_processed": latest.jobs_processed,
+            }
+            if latest is not None else None
+        )
+
+        # Per-field breakdown — flatten the (field -> {status: n}) map
+        # into a list the UI can render as a small table.
+        per_field_raw = count_by_field(db, collection)
+        by_field = [
+            {
+                "field_path": field,
+                "completed": counts.get("completed", 0),
+                "pending": counts.get("pending", 0),
+                "in_flight": counts.get("in_flight", 0),
+                "failed": counts.get("failed", 0),
+            }
+            for field, counts in sorted(per_field_raw.items())
+        ]
+
+        # Recent activity feed: most-recent completed + failed jobs.
+        feed = recent_jobs(db, collection, limit=recent_limit)
+        # Serialize datetimes for the JSON response.
+        for row in feed:
+            for k in ("completed_at", "enqueued_at"):
+                if row.get(k) is not None:
+                    row[k] = row[k].isoformat()
+
+        # Failed-jobs sample (already-failed, last_error visible). Distinct
+        # from `recent` so the UI can show them in a separate "needs
+        # attention" panel.
+        failed_sample = [
+            {
+                **j,
+                "enqueued_at": j["enqueued_at"].isoformat()
+                    if j.get("enqueued_at") is not None else None,
+            }
+            for j in recent_failed_jobs(db, limit=10)
+            if j.get("collection") == collection
+        ]
+
+        return {
+            "collection": collection,
+            "totals": {
+                "completed": completed,
+                "pending": pending,
+                "in_flight": in_flight,
+                "failed": failed,
+                "total": total,
+            },
+            "by_field": by_field,
+            "worker": worker,
+            "recent": feed,
+            "failed_sample": failed_sample,
+        }
     finally:
         conn.close()
 

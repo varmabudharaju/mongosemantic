@@ -622,6 +622,9 @@
     // Clean up any leftover collection tabs before the new handler runs;
     // handlers that need them call mountCollectionTabs() themselves.
     document.querySelectorAll(".collection-tabs").forEach(el => el.remove());
+    // Stop any active polling loop from a previous page so we don't keep
+    // hitting /api/indexing/status while the user is on Search or Dashboard.
+    _stopIndexingPolling();
     showPage(page);
     handlers[page] && handlers[page](args.map(decodeURIComponent));
   };
@@ -635,6 +638,195 @@
     { page: "indexing", label: "Index"     },
     { page: "search",   label: "Search"    },
   ];
+  // -- Indexing page polling --------------------------------------------
+  // Handle for the active polling timer so route changes can cancel it.
+  let _indexingPollHandle = null;
+  // Previous (completed_count, timestamp) used to compute live throughput.
+  let _indexingThroughput = { lastCount: null, lastT: null, rate: 0 };
+
+  function _stopIndexingPolling() {
+    if (_indexingPollHandle) {
+      clearTimeout(_indexingPollHandle);
+      _indexingPollHandle = null;
+    }
+    _indexingThroughput = { lastCount: null, lastT: null, rate: 0 };
+  }
+
+  function _fmtAge(iso) {
+    if (!iso) return "—";
+    const dt = Date.now() - Date.parse(iso);
+    if (Number.isNaN(dt)) return "—";
+    const s = Math.max(0, Math.floor(dt / 1000));
+    if (s < 60) return s + "s ago";
+    if (s < 3600) return Math.floor(s / 60) + "m ago";
+    return Math.floor(s / 3600) + "h ago";
+  }
+  function _fmtEta(seconds) {
+    if (!isFinite(seconds) || seconds <= 0) return "—";
+    if (seconds < 60) return `${Math.ceil(seconds)} s`;
+    const m = seconds / 60;
+    if (m < 60) return `${Math.ceil(m)} min`;
+    const h = m / 60;
+    return `${h.toFixed(1)} h`;
+  }
+
+  async function _startIndexingPolling(collection, totalDocsHint) {
+    _stopIndexingPolling();
+    const tiles = $("#indexing-tiles");
+    const byFieldPanel = $("#indexing-by-field");
+    const feedPanel = $("#indexing-feed-panel");
+    const failedPanel = $("#indexing-failed-panel");
+    const bar = $("#indexing-progress");
+    const metric = $("#indexing-metric");
+    const eta = $("#indexing-eta");
+
+    const tick = async () => {
+      let s;
+      try {
+        s = await fetchJson("GET", `/api/indexing/status?collection=${encodeURIComponent(collection)}`);
+      } catch (e) {
+        metric.textContent = "Status fetch failed: " + e.message;
+        return;
+      }
+      const t = s.totals || {};
+      const total = t.total || 0;
+      const done = t.completed || 0;
+      const pending = t.pending || 0;
+      const inflight = t.in_flight || 0;
+      const failed = t.failed || 0;
+
+      // Tiles
+      tiles.hidden = false;
+      $("#tile-completed").textContent = done.toLocaleString();
+      $("#tile-inflight").textContent = inflight.toLocaleString();
+      $("#tile-pending").textContent = pending.toLocaleString();
+      $("#tile-failed").textContent = failed.toLocaleString();
+
+      // Worker
+      const dot = $("#tile-worker-dot");
+      const text = $("#tile-worker-text");
+      if (s.worker && s.worker.last_heartbeat) {
+        const ageS = (Date.now() - Date.parse(s.worker.last_heartbeat)) / 1000;
+        const live = ageS < 30;
+        dot.style.background = live ? "var(--mdb-leaf, #13aa52)" : "var(--mdb-bad, #b91c1c)";
+        text.textContent = live
+          ? `live · ${s.worker.jobs_processed.toLocaleString()} processed`
+          : `stale ${Math.floor(ageS)}s ago`;
+      } else if (pending || inflight) {
+        dot.style.background = "var(--mdb-bad, #b91c1c)";
+        text.textContent = "no worker — start `mongosemantic worker` or restart the UI";
+      } else {
+        dot.style.background = "var(--mdb-ink-muted, #888)";
+        text.textContent = "idle";
+      }
+
+      // Progress + ETA + throughput
+      bar.max = total || 1;
+      bar.value = done;
+      const pct = total ? Math.floor((done / total) * 100) : 0;
+      metric.textContent = total
+        ? `${done.toLocaleString()} / ${total.toLocaleString()} (${pct}%)`
+        : "Enqueueing…";
+      // Throughput: rolling delta. Resists transient zero-rate dips so the
+      // ETA doesn't flicker between sensible and "—".
+      const now = Date.now();
+      if (_indexingThroughput.lastCount !== null) {
+        const dCount = done - _indexingThroughput.lastCount;
+        const dT = (now - _indexingThroughput.lastT) / 1000;
+        if (dT > 0 && dCount >= 0) {
+          // Light smoothing — favor the new rate when stable.
+          const inst = dCount / dT;
+          _indexingThroughput.rate =
+            _indexingThroughput.rate === 0
+              ? inst
+              : 0.4 * _indexingThroughput.rate + 0.6 * inst;
+        }
+      }
+      _indexingThroughput.lastCount = done;
+      _indexingThroughput.lastT = now;
+      const remaining = pending + inflight;
+      if (remaining > 0 && _indexingThroughput.rate > 0.1) {
+        eta.textContent =
+          `${_indexingThroughput.rate.toFixed(0)} jobs/sec · ETA ${_fmtEta(remaining / _indexingThroughput.rate)}`;
+      } else if (remaining === 0 && done > 0) {
+        eta.textContent = "✓ All jobs complete.";
+      } else {
+        eta.textContent = "Calculating throughput…";
+      }
+
+      // Per-field breakdown
+      const fields = s.by_field || [];
+      if (fields.length) {
+        byFieldPanel.hidden = false;
+        const head = `<thead><tr>
+          <th>Field</th><th>Completed</th><th>In flight</th><th>Pending</th><th>Failed</th>
+        </tr></thead>`;
+        const rows = fields.map(f => `<tr>
+          <td><code>${escapeHtml(f.field_path)}</code></td>
+          <td>${(f.completed || 0).toLocaleString()}</td>
+          <td>${(f.in_flight || 0).toLocaleString()}</td>
+          <td>${(f.pending || 0).toLocaleString()}</td>
+          <td>${(f.failed || 0).toLocaleString()}</td>
+        </tr>`).join("");
+        $("#indexing-field-table").innerHTML = head + "<tbody>" + rows + "</tbody>";
+      }
+
+      // Failed-jobs panel
+      const failedSample = s.failed_sample || [];
+      if (failedSample.length) {
+        failedPanel.hidden = false;
+        $("#indexing-failed-count").textContent = `(${failedSample.length} shown)`;
+        $("#indexing-failed-list").innerHTML = failedSample.map(j => `
+          <div class="failed-job">
+            <div class="failed-job-head">
+              <code>${escapeHtml(j.field_path || "?")}</code>
+              <span class="failed-job-id">${escapeHtml(j.source_id || "")}</span>
+              <span class="failed-job-attempts">attempts: ${j.attempts || 0}</span>
+            </div>
+            <pre class="failed-job-error">${escapeHtml(j.last_error || "")}</pre>
+          </div>
+        `).join("");
+      } else {
+        failedPanel.hidden = true;
+      }
+
+      // Recent activity feed
+      const feed = s.recent || [];
+      if (feed.length) {
+        feedPanel.hidden = false;
+        $("#indexing-feed").innerHTML = feed.map(j => {
+          const isOk = j.status === "completed";
+          const ts = j.completed_at || j.enqueued_at;
+          return `<li class="feed-item feed-${isOk ? "ok" : "bad"}">
+            <span class="feed-status">${isOk ? "✓" : "✗"}</span>
+            <code class="feed-field">${escapeHtml(j.field_path || "?")}</code>
+            <span class="feed-id">${escapeHtml(j.source_id || "")}</span>
+            ${j.chunk_index !== null && j.chunk_index !== undefined
+              ? `<span class="feed-chunk">chunk ${j.chunk_index}</span>` : ""}
+            <span class="feed-age">${_fmtAge(ts)}</span>
+            ${!isOk && j.last_error
+              ? `<div class="feed-error">${escapeHtml(j.last_error)}</div>` : ""}
+          </li>`;
+        }).join("");
+      }
+
+      // Decide whether to keep polling. Once the queue drains we slow down,
+      // then stop; the user can re-render by re-navigating to this page.
+      const stillWorking = pending > 0 || inflight > 0;
+      const nextDelay = stillWorking ? 1500 : 4000;
+      // Stop polling entirely after 3 idle ticks so we don't keep a hot
+      // loop running on a page the user left open.
+      if (!stillWorking) {
+        _indexingThroughput.idleTicks = (_indexingThroughput.idleTicks || 0) + 1;
+        if (_indexingThroughput.idleTicks >= 3) return;
+      } else {
+        _indexingThroughput.idleTicks = 0;
+      }
+      _indexingPollHandle = setTimeout(tick, nextDelay);
+    };
+    tick();
+  }
+
   function mountCollectionTabs(collection, currentPage) {
     document.querySelectorAll(".collection-tabs").forEach(el => el.remove());
     if (!collection) return;
@@ -893,26 +1085,29 @@
       $("#indexing-title").textContent = CONTENT.indexing.title.replace("{collection}", name);
       const bar = $("#indexing-progress");
       const metric = $("#indexing-metric");
+      const eta = $("#indexing-eta");
       bar.max = 1; bar.value = 0;
       metric.textContent = "Enqueueing…";
+      eta.textContent = "";
+      // 1) Synchronously enqueue, like before. The POST returns once every
+      //    job is in the queue.
+      let enqueued = 0, totalDocs = 0;
       try {
         const r = await fetchJson("POST", `/api/collections/${encodeURIComponent(name)}/index`);
-        // Enqueueing is synchronous and complete by the time this returns.
-        // Show the progress bar as full + a clear count + worker hint.
-        bar.max = 1; bar.value = 1;
-        const jobs = r.enqueued || 0;
-        const docs = r.total || 0;
-        const c = CONTENT.indexing;
-        metric.innerHTML =
-          escapeHtml(c.metric_enqueued
-            .replace("{jobs}", jobs)
-            .replace("{s}", jobs === 1 ? "" : "s")
-            .replace("{docs}", docs)
-            .replace("{ds}", docs === 1 ? "" : "s")) +
-          `<br><small style="color:var(--mdb-ink-muted)">${escapeHtml(c.metric_worker_hint)}</small>`;
-        toast(c.toast_complete.replace("{n}", jobs));
-      } catch (e) { toast(e.message); }
+        enqueued = r.enqueued || 0;
+        totalDocs = r.total || 0;
+        toast(CONTENT.indexing.toast_complete.replace("{n}", enqueued));
+      } catch (e) {
+        toast(e.message);
+        metric.textContent = "Enqueueing failed: " + e.message;
+        return;
+      }
+      // 2) Poll /api/indexing/status until the queue drains, rendering
+      //    tiles, per-field breakdown, recent feed, and failed-jobs panel.
+      _startIndexingPolling(name, totalDocs);
     },
+
+    // -- Indexing page polling + render ---------------------------------
 
     search: async ([scopedCollection]) => {
       mountCollectionTabs(scopedCollection, "search");

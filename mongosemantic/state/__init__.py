@@ -18,12 +18,14 @@ from mongosemantic.state.job_queue import (
     claim_batch,
     complete,
     count_by_collection,
+    count_by_field,
     count_by_status,
     enqueue_delete_all,
     enqueue_embed,
     ensure_indexes,
     fail,
     recent_failed_jobs,
+    recent_jobs,
     reset_failed,
 )
 from mongosemantic.state.resume_tokens import (
@@ -51,6 +53,8 @@ __all__ = [
     "recent_failed_jobs",
     "count_by_status",
     "count_by_collection",
+    "count_by_field",
+    "recent_jobs",
     "save_resume_token",
     "load_resume_token",
     "save_polling_watermark",
