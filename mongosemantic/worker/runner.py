@@ -174,6 +174,7 @@ def process_batch(
     provider: EmbeddingProvider | ProviderRegistry,
     worker_id: str,
     batch_size: int,
+    hnsw_manager: Any | None = None,
 ) -> int:
     """Claim and process up to `batch_size` jobs.
 
@@ -228,6 +229,15 @@ def process_batch(
             try:
                 _write_embedding(db, cfg_cache, job, vec.tolist())
                 complete(db, job["_id"])
+                # Bump HNSW staleness for the affected (collection, field, model).
+                # The manager owns the rebuild-or-not decision; we just notify.
+                if hnsw_manager is not None:
+                    try:
+                        hnsw_manager.mark_stale(
+                            (job["collection"], job["field_path"], model_key)
+                        )
+                    except Exception:
+                        log.exception("HNSW mark_stale failed")
             except Exception as e:
                 log.exception("write failed")
                 fail(db, job["_id"], reason=f"write: {e}")
@@ -241,6 +251,7 @@ class WorkerRunner:
         provider: EmbeddingProvider | ProviderRegistry,
         batch_size: int = 32,
         idle_sleep: float = 2.0,
+        hnsw_manager: Any | None = None,
     ) -> None:
         self.db = db
         # Wrap a single provider so the runner always operates against a
@@ -251,6 +262,7 @@ class WorkerRunner:
             if isinstance(provider, ProviderRegistry)
             else _SingleProviderRegistry(provider)
         )
+        self.hnsw_manager = hnsw_manager
         self.batch_size = batch_size
         self.idle_sleep = idle_sleep
         self.worker_id = f"worker-{uuid.uuid4().hex[:8]}"
@@ -281,8 +293,47 @@ class WorkerRunner:
         log.info("worker %s starting", self.worker_id)
         self._maybe_heartbeat()
         while not self._stop.is_set():
-            n = process_batch(self.db, self.provider, self.worker_id, self.batch_size)
+            n = process_batch(
+                self.db, self.provider, self.worker_id, self.batch_size,
+                hnsw_manager=self.hnsw_manager,
+            )
             self._jobs_processed += n
             self._maybe_heartbeat()
+            self._maybe_rebuild_hnsw()
             if n == 0:
                 time.sleep(self.idle_sleep)
+
+    def _maybe_rebuild_hnsw(self) -> None:
+        """If any HNSW index has accumulated enough stale rows, rebuild it
+        in a daemon thread so the main worker loop keeps draining the queue.
+        The manager itself decides 'enough'.
+        """
+        mgr = self.hnsw_manager
+        if mgr is None:
+            return
+        try:
+            stale_keys = [k for k in mgr.loaded_keys() if mgr.should_rebuild(k)]
+        except Exception:
+            log.exception("HNSW should_rebuild check failed")
+            return
+        for key in stale_keys:
+            threading.Thread(
+                target=self._rebuild_one,
+                args=(key,),
+                name=f"hnsw-rebuild-{key[0]}",
+                daemon=True,
+            ).start()
+
+    def _rebuild_one(self, key) -> None:
+        """Rebuild a single HNSW index. Looks up the live config to make
+        sure we're using the current field set and dim. Cheap on the order
+        of seconds — we accept a brief window of search latency hits."""
+        collection, field_path, _model = key
+        try:
+            cfg = load_config(self.db, collection)
+            if cfg is None:
+                return
+            log.info("HNSW rebuild starting: %s", key)
+            self.hnsw_manager.build(self.db, cfg, field_path)
+        except Exception:
+            log.exception("HNSW rebuild failed: %s", key)

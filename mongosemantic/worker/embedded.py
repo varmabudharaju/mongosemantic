@@ -53,6 +53,7 @@ class _RunningWorker:
         conn: MongoConnection,
         identity: _Identity,
         registry: ProviderRegistry,
+        hnsw_manager: object | None = None,
     ) -> None:
         self.conn = conn
         self.identity = identity
@@ -60,7 +61,7 @@ class _RunningWorker:
         # search route use the same SentenceTransformer instance, loaded
         # exactly once per process.
         ensure_indexes(conn.db)
-        self.runner = WorkerRunner(conn.db, registry)
+        self.runner = WorkerRunner(conn.db, registry, hnsw_manager=hnsw_manager)
         self.runner_thread = threading.Thread(
             target=self.runner.run, name="embed-worker", daemon=True
         )
@@ -131,9 +132,11 @@ class EmbeddedWorkerSupervisor:
         self,
         check_interval: float = CHECK_INTERVAL_S,
         registry: ProviderRegistry | None = None,
+        hnsw_manager: object | None = None,
     ) -> None:
         self._check_interval = check_interval
         self._registry = registry or ProviderRegistry()
+        self._hnsw_manager = hnsw_manager
         self._stop = threading.Event()
         self._thread = threading.Thread(
             target=self._run, name="embed-supervisor", daemon=True
@@ -186,7 +189,9 @@ class EmbeddedWorkerSupervisor:
             log.warning("embedded worker: cannot connect yet (%s); will retry", e)
             return
         try:
-            running = _RunningWorker(conn, identity, self._registry)
+            running = _RunningWorker(
+                conn, identity, self._registry, self._hnsw_manager
+            )
             running.start()
             self._running = running
             log.info("embedded worker started against %s/%s", identity.uri, identity.database)

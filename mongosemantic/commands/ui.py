@@ -46,7 +46,10 @@ def ui_cmd(
     # instance per process instead of each loading their own.
     app = create_app()
     if not no_worker:
-        supervisor = EmbeddedWorkerSupervisor(registry=app.state.providers)
+        supervisor = EmbeddedWorkerSupervisor(
+            registry=app.state.providers,
+            hnsw_manager=app.state.hnsw,
+        )
         supervisor.start()
         console.print("[green]Embedded worker running in background.[/green]")
     uvicorn.run(app, host=host, port=port)
