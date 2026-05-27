@@ -950,40 +950,99 @@ pre#query-results {
   font-size: 13px;
   margin: 0 0 12px;
 }
-#inspect-sample {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 12px;
-}
-.sample-doc {
+.inspect-sample-list {
   background: #fff;
   border: 1px solid var(--mdb-line);
   border-radius: 8px;
-  padding: 14px;
-  font-size: 12px;
+  max-height: 480px;
+  overflow-y: auto;
+}
+.sample-doc-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--mdb-line);
+  padding: 10px 14px;
   font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  color: inherit;
   overflow: hidden;
-}
-.sample-doc dl {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 4px 12px;
-  margin: 0;
-}
-.sample-doc dt {
-  color: var(--mdb-ink-muted);
-  font-size: 11px;
   white-space: nowrap;
-}
-.sample-doc dd {
-  margin: 0;
-  overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
+.sample-doc-row:last-child { border-bottom: none; }
+.sample-doc-row:hover { background: #f5f7f9; }
+.sample-doc-row:focus-visible { outline: 2px solid #13aa52; outline-offset: -2px; }
+.sample-row-field { margin-right: 18px; }
+.sample-row-key { color: var(--mdb-ink-muted); font-size: 11px; }
 .sample-doc-empty {
   color: var(--mdb-ink-muted);
   font-style: italic;
+  padding: 14px;
+}
+
+/* ---- inspect detail side panel ------------------------------------- */
+.inspect-detail-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 90;
+}
+.inspect-detail-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: min(560px, 45vw);
+  background: #fff;
+  border-left: 1px solid var(--mdb-line);
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+  animation: inspect-detail-slide 180ms ease-out;
+}
+@keyframes inspect-detail-slide {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+.inspect-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--mdb-line);
+  font-weight: 600;
+  font-size: 14px;
+}
+#inspect-detail-close {
+  background: transparent;
+  border: none;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--mdb-ink-muted);
+  padding: 0 4px;
+}
+#inspect-detail-close:hover { color: var(--mdb-ink); }
+.inspect-detail-body {
+  flex: 1;
+  margin: 0;
+  padding: 16px 18px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #fafbfc;
+}
+@media (max-width: 720px) {
+  .inspect-detail-panel { width: 100vw; }
 }
 
 /* Big green CTA button (Configure semantic search etc) */

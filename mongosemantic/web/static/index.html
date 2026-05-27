@@ -173,16 +173,12 @@
       <aside class="page-help">
         <strong>How to use</strong>
         <ol>
-          <li>Browse a few sample documents below to see what's in this collection.</li>
           <li>The table scores every field for semantic-search suitability — look for <em>Great</em> or <em>Good</em>.</li>
           <li>Click <em>Configure semantic search</em> to pick which fields to embed.</li>
+          <li>Scroll the sample list at the bottom and click any row to inspect a full document.</li>
         </ol>
         <span class="try-line"><strong>Bands:</strong> Great = long, varied text. Good = usable. Usable = short/sparse, combine with another field. Not recommended = IDs, numerics, dates.</span>
       </aside>
-
-      <h3 class="inspect-section-title">Sample documents</h3>
-      <p class="inspect-section-hint">A few random docs so you can see the shape of the data before configuring.</p>
-      <div id="inspect-sample"></div>
 
       <h3 class="inspect-section-title">Field analysis</h3>
       <div class="table-wrap"><table id="inspect-table"></table></div>
@@ -190,7 +186,21 @@
       <p style="margin-top:24px">
         <a id="inspect-apply-link" class="cta-button" href="#/apply/">Configure semantic search</a>
       </p>
+
+      <h3 class="inspect-section-title">Sample documents</h3>
+      <p class="inspect-section-hint">Click any row to inspect the full document.</p>
+      <div id="inspect-sample" class="inspect-sample-list"></div>
     </section>
+
+    <!-- Slide-in panel for full document inspection. Hidden by default. -->
+    <div id="inspect-detail-backdrop" class="inspect-detail-backdrop" hidden></div>
+    <aside id="inspect-detail-panel" class="inspect-detail-panel" hidden aria-hidden="true">
+      <header class="inspect-detail-header">
+        <span id="inspect-detail-title">Document</span>
+        <button type="button" id="inspect-detail-close" aria-label="Close">×</button>
+      </header>
+      <pre id="inspect-detail-body" class="inspect-detail-body"></pre>
+    </aside>
 
     <section id="page-apply" hidden>
       <h2 data-content="apply.title"></h2>

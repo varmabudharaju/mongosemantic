@@ -89,19 +89,64 @@
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 
-  // Render one Mongo document as a compact key/value card. Truncates long
-  // string values; arrays/objects/IDs get a short tag like "[12 items]".
-  function renderSampleDoc(doc) {
-    const rows = Object.entries(doc).map(([k, v]) => {
+  // In-memory store of the currently-displayed sample docs, indexed by the
+  // row's data-idx. Lets the click handler retrieve the full doc without
+  // re-fetching or round-tripping through HTML.
+  let _sampleDocs = [];
+
+  // Render one Mongo document as a compact list row. Shows the first 1-3
+  // meaningful fields as a preview; the full doc opens in the side panel on
+  // click. Long strings are truncated; arrays/objects get a short tag.
+  function renderSampleRow(doc, idx) {
+    const entries = Object.entries(doc).filter(([k]) => k !== "_id");
+    const preview = entries.slice(0, 3).map(([k, v]) => {
       let display;
       if (v === null) display = "null";
       else if (Array.isArray(v)) display = `[${v.length} item${v.length === 1 ? "" : "s"}]`;
       else if (typeof v === "object") display = v.$oid ? `ObjectId(${v.$oid.slice(0, 6)}…)` : "{…}";
-      else if (typeof v === "string") display = v.length > 80 ? v.slice(0, 80) + "…" : v;
+      else if (typeof v === "string") display = v.length > 70 ? v.slice(0, 70) + "…" : v;
       else display = String(v);
-      return `<dt>${escapeHtml(k)}</dt><dd title="${escapeHtml(typeof v === "string" ? v : "")}">${escapeHtml(display)}</dd>`;
+      return `<span class="sample-row-field"><span class="sample-row-key">${escapeHtml(k)}:</span> ${escapeHtml(display)}</span>`;
     }).join("");
-    return `<div class="sample-doc"><dl>${rows}</dl></div>`;
+    return `<button type="button" class="sample-doc-row" data-idx="${idx}">${preview}</button>`;
+  }
+
+  function _docLabel(doc) {
+    return doc.title || doc.name || doc._id?.$oid?.slice(0, 8) || `Document ${(arguments[1] ?? 0) + 1}`;
+  }
+
+  function openInspectDetail(idx) {
+    const doc = _sampleDocs[idx];
+    if (!doc) return;
+    $("#inspect-detail-title").textContent = _docLabel(doc, idx);
+    $("#inspect-detail-body").textContent = JSON.stringify(doc, null, 2);
+    $("#inspect-detail-backdrop").hidden = false;
+    const panel = $("#inspect-detail-panel");
+    panel.hidden = false;
+    panel.setAttribute("aria-hidden", "false");
+  }
+
+  function closeInspectDetail() {
+    $("#inspect-detail-backdrop").hidden = true;
+    const panel = $("#inspect-detail-panel");
+    panel.hidden = true;
+    panel.setAttribute("aria-hidden", "true");
+  }
+
+  // Wire up the detail-panel handlers once (idempotent on re-runs).
+  function _ensureDetailPanelWired() {
+    if (_ensureDetailPanelWired._done) return;
+    _ensureDetailPanelWired._done = true;
+    $("#inspect-detail-close").addEventListener("click", closeInspectDetail);
+    $("#inspect-detail-backdrop").addEventListener("click", closeInspectDetail);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !$("#inspect-detail-panel").hidden) closeInspectDetail();
+    });
+    $("#inspect-sample").addEventListener("click", (e) => {
+      const row = e.target.closest(".sample-doc-row");
+      if (!row) return;
+      openInspectDetail(Number(row.dataset.idx));
+    });
   }
 
   // ---- connection page state machine + actions ---------------------------
@@ -655,15 +700,21 @@
       if (!name) return;
       $("#inspect-title").textContent = CONTENT.inspect.title.replace("{collection}", name);
       $("#inspect-apply-link").href = `#/apply/${encodeURIComponent(name)}`;
+      _ensureDetailPanelWired();
+      closeInspectDetail();  // reset panel state when switching collections
 
-      // Sample documents — rendered first so users see the data before stats.
+      // Sample documents — scrollable list at the bottom of the page. Each
+      // row opens the full doc in the side panel on click.
       const sample = $("#inspect-sample");
       sample.innerHTML = '<p class="sample-doc-empty">loading sample…</p>';
       try {
-        const s = await fetchJson("GET", `/api/collections/${encodeURIComponent(name)}/sample?limit=3`);
-        sample.innerHTML = (s.documents || []).map(renderSampleDoc).join("")
-          || '<p class="sample-doc-empty">No documents in this collection.</p>';
+        const s = await fetchJson("GET", `/api/collections/${encodeURIComponent(name)}/sample?limit=20`);
+        _sampleDocs = s.documents || [];
+        sample.innerHTML = _sampleDocs.length
+          ? _sampleDocs.map((d, i) => renderSampleRow(d, i)).join("")
+          : '<p class="sample-doc-empty">No documents in this collection.</p>';
       } catch (e) {
+        _sampleDocs = [];
         sample.innerHTML = `<p class="sample-doc-empty">Could not load sample: ${escapeHtml(e.message)}</p>`;
       }
 
