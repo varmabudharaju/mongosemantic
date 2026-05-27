@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import csv
+import io
+import re
 import time
 from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from bson import ObjectId
+from bson import ObjectId, json_util
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 
 from mongosemantic.commands.search import _run_one, hybrid_available, run_one_hybrid
 from mongosemantic.config import Settings
@@ -80,6 +84,70 @@ def _serialize(row: dict) -> dict:
     return out
 
 
+_EXPORT_COLUMNS = (
+    "score",
+    "source_collection",
+    "source_id",
+    "field_path",
+    "chunk_index",
+    "chunk_text",
+    "source_doc_json",
+)
+
+
+def _slugify_for_filename(s: str, max_len: int = 40) -> str:
+    """Make a filename-safe slug from the query: spaces -> dashes, drop
+    anything outside [A-Za-z0-9_-], trim."""
+    s = re.sub(r"\s+", "-", s.strip())
+    s = re.sub(r"[^A-Za-z0-9_-]", "", s)
+    return s[:max_len] or "search"
+
+
+def _row_to_export_dict(row: dict) -> dict:
+    """Pick the columns we export. source_doc is collapsed to a JSON string
+    so CSV stays flat — readers who want structure can parse it back."""
+    return {
+        "score": row.get("score"),
+        "source_collection": row.get("source_collection"),
+        "source_id": row.get("source_id") if row.get("source_id") is not None else "",
+        "field_path": row.get("field_path"),
+        "chunk_index": row.get("chunk_index"),
+        "chunk_text": row.get("chunk_text"),
+        # `_serialize` already passed source_doc through, but it may still
+        # contain BSON scalars; json_util.dumps is the canonical way to
+        # serialize them.
+        "source_doc_json": json_util.dumps(row.get("source_doc") or {}),
+    }
+
+
+def _csv_stream(rows: list[dict]):
+    """Yield CSV bytes one row at a time so huge exports don't buffer
+    the whole payload in memory before the first byte goes out."""
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=_EXPORT_COLUMNS)
+    writer.writeheader()
+    yield buf.getvalue().encode("utf-8")
+    for row in rows:
+        buf.seek(0); buf.truncate(0)
+        writer.writerow(_row_to_export_dict(row))
+        yield buf.getvalue().encode("utf-8")
+
+
+def _jsonl_stream(rows: list[dict]):
+    """One JSON object per line, BSON-safe via json_util."""
+    for row in rows:
+        out = {
+            "score": row.get("score"),
+            "source_collection": row.get("source_collection"),
+            "source_id": row.get("source_id"),
+            "field_path": row.get("field_path"),
+            "chunk_index": row.get("chunk_index"),
+            "chunk_text": row.get("chunk_text"),
+            "source_doc": row.get("source_doc"),
+        }
+        yield (json_util.dumps(out) + "\n").encode("utf-8")
+
+
 @router.get("/api/search")
 def search(
     request: Request,
@@ -92,7 +160,10 @@ def search(
     limit: int = Query(10, ge=1, le=100_000),
     hybrid: bool = Query(False),
     min_score: float = Query(0.0, ge=0.0, le=1.0),
-) -> dict:
+    # `format=csv` and `format=jsonl` stream the same result set as a
+    # download instead of returning the in-page JSON envelope.
+    format: str = Query("json", pattern="^(json|csv|jsonl)$"),
+):
     if collection:
         try:
             validate_identifier(collection)
@@ -187,11 +258,33 @@ def search(
         if min_score > 0:
             rows = [r for r in rows if r.get("score", 0) >= min_score]
         took_ms = int((time.perf_counter() - started) * 1000)
-        return {
-            "query": q,
-            "rows": [_serialize(r) for r in rows],
-            "notice": notice,
-            "took_ms": took_ms,
-        }
+        serialized = [_serialize(r) for r in rows]
+        if format == "json":
+            return {
+                "query": q,
+                "rows": serialized,
+                "notice": notice,
+                "took_ms": took_ms,
+            }
+        # Non-JSON: stream as a download. Filename includes the query slug
+        # + a row count so it's easy to identify on disk.
+        slug = _slugify_for_filename(q)
+        n = len(serialized)
+        if format == "csv":
+            filename = f"mongosemantic-{slug}-{n}.csv"
+            return StreamingResponse(
+                _csv_stream(serialized),
+                media_type="text/csv",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+        if format == "jsonl":
+            filename = f"mongosemantic-{slug}-{n}.jsonl"
+            return StreamingResponse(
+                _jsonl_stream(serialized),
+                media_type="application/x-ndjson",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+        # Unreachable — Query() pattern enforces the allowed values.
+        raise HTTPException(status_code=400, detail=f"unknown format {format!r}")
     finally:
         conn.close()

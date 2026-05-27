@@ -932,6 +932,20 @@
       const limitInput = $("#search-limit");
       const minScoreInput = $("#search-min-score");
       const minScoreValue = $("#search-min-score-value");
+      const exportBar = $("#search-export");
+      // Captures the last successful search params so the export buttons
+      // can replay the same query with a format= override.
+      let _lastSearchParams = null;
+      exportBar.onclick = (e) => {
+        const btn = e.target.closest("button[data-export]");
+        if (!btn || !_lastSearchParams) return;
+        const params = new URLSearchParams(_lastSearchParams);
+        params.set("format", btn.dataset.export);
+        // Navigate top-window so the browser handles the download (header
+        // Content-Disposition: attachment). Same-origin so cookies / auth
+        // tag along; no extra fetch round-trip.
+        window.location.href = "/api/search?" + params.toString();
+      };
       // Min-score is still a slider — keep its live label in sync. The
       // Results input is now a free-form number, so no label to update.
       minScoreInput.oninput = () => {
@@ -966,6 +980,7 @@
         if (!q) {
           results.innerHTML = ""; notice.textContent = "";
           stats.hidden = true;
+          exportBar.hidden = true;
           empty.textContent = c.empty_no_query; return;
         }
         const goBtn = $("#search-go");
@@ -978,11 +993,16 @@
         if (Number(minScoreInput.value) > 0) params.set("min_score", minScoreInput.value);
         try {
           const r = await fetchJson("GET", "/api/search?" + params.toString());
+          // Remember exactly what we asked for so the export buttons
+          // download the same rows the user is currently looking at.
+          _lastSearchParams = params.toString();
+          exportBar.hidden = false;
           notice.textContent = r.notice || "";
           _searchRows = r.rows || [];
           if (!_searchRows.length) {
             empty.textContent = c.empty_no_results;
             results.innerHTML = "";
+            exportBar.hidden = true;
             stats.hidden = false;
             stats.textContent = `0 results in ${r.took_ms ?? "—"} ms` +
               (Number(minScoreInput.value) > 0

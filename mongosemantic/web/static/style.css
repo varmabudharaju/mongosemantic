@@ -569,6 +569,36 @@ tbody tr:hover { background: var(--mdb-canvas); }
   color: var(--mdb-ink-muted);
   margin: var(--space-3) 0 var(--space-2);
 }
+.search-export {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: var(--space-3) 0;
+  padding: 8px 12px;
+  background: var(--mdb-leaf-tint, #e3fcef);
+  border: 1px solid var(--mdb-line);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.search-export-label {
+  color: var(--mdb-ink-muted);
+  margin-right: 4px;
+}
+.search-export button {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  background: #fff;
+  color: var(--mdb-forest, #00684A);
+  border: 1px solid var(--mdb-line);
+  border-radius: 6px;
+  cursor: pointer;
+  margin: 0;
+}
+.search-export button:hover {
+  background: var(--mdb-forest, #00684A);
+  color: #fff;
+}
 .search-score-bar {
   height: 4px;
   background: var(--mdb-line);
