@@ -1399,28 +1399,215 @@
     query: async () => {
       const ta = $("#query-pipeline");
       const out = $("#query-results");
+      const tableWrap = $("#query-results-table");
+      const tableEl = $("#query-table");
       const sel = $("#query-collection");
+      const exampleSel = $("#query-example");
+      const stats = $("#query-stats");
+      const viewToggle = $("#query-view-toggle");
+      const exportBar = $("#query-export");
+
       try {
         const cols = await fetchJson("GET", "/api/collections");
         sel.innerHTML = cols.collections
           .map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}${c.status === "configured" ? " (configured)" : ""}</option>`)
           .join("");
       } catch (e) { toast(e.message); }
+
+      // Quick examples: minimal, generic shapes. Users edit the inserted
+      // pipeline before running — placeholders are intentional.
+      const EXAMPLES = {
+        sample:   `[{"$sample": {"size": 5}}]`,
+        count:    `[{"$count": "n"}]`,
+        group:    `[
+  {"$group": {"_id": "$<FIELD>", "n": {"$sum": 1}}},
+  {"$sort": {"n": -1}},
+  {"$limit": 10}
+]`,
+        top:      `[
+  {"$sort": {"<NUMERIC_FIELD>": -1}},
+  {"$limit": 10},
+  {"$project": {"_id": 1, "<NUMERIC_FIELD>": 1}}
+]`,
+        distinct: `[
+  {"$group": {"_id": "$<FIELD>"}},
+  {"$sort": {"_id": 1}},
+  {"$limit": 50}
+]`,
+      };
+      exampleSel.onchange = () => {
+        const v = EXAMPLES[exampleSel.value];
+        if (v) ta.value = v;
+        exampleSel.value = "";
+      };
+      // Default the textarea to a useful starting point if empty.
+      if (!ta.value.trim()) ta.value = EXAMPLES.sample;
+
+      // -- View / export state ---------------------------------------------
+      let _lastRows = [];
+      let _lastView = "table";
+
+      function _flatColumns(rows) {
+        // Use the first row to determine columns. Only render as a table if
+        // every row's top-level keys are scalars / null — nested objects or
+        // arrays get the JSON view instead.
+        if (!rows.length) return null;
+        const cols = Object.keys(rows[0]);
+        if (!cols.length) return null;
+        const allFlat = rows.every(r =>
+          cols.every(k => {
+            const v = r[k];
+            return v === null || v === undefined ||
+                   typeof v === "string" || typeof v === "number" ||
+                   typeof v === "boolean";
+          })
+        );
+        return allFlat ? cols : null;
+      }
+
+      function renderTable(rows) {
+        const cols = _flatColumns(rows);
+        if (!cols) {
+          // Force JSON view; gray out the Table button.
+          _lastView = "json";
+          viewToggle.querySelectorAll("button").forEach(b => {
+            b.classList.toggle("active", b.dataset.view === "json");
+            if (b.dataset.view === "table") b.disabled = true;
+          });
+          tableWrap.hidden = true;
+          out.hidden = false;
+          out.textContent = JSON.stringify(rows, null, 2);
+          return;
+        }
+        viewToggle.querySelectorAll("button").forEach(b => b.disabled = false);
+        const head = `<thead><tr>${cols.map(c => `<th>${escapeHtml(c)}</th>`).join("")}</tr></thead>`;
+        const body = rows.map(r => `<tr>${cols.map(c => {
+          const v = r[c];
+          const display = v === null || v === undefined ? "—" : String(v);
+          return `<td>${escapeHtml(display)}</td>`;
+        }).join("")}</tr>`).join("");
+        tableEl.innerHTML = head + "<tbody>" + body + "</tbody>";
+      }
+
+      function rerenderCurrent() {
+        if (_lastView === "table") {
+          tableWrap.hidden = false;
+          out.hidden = true;
+          renderTable(_lastRows);
+        } else {
+          tableWrap.hidden = true;
+          out.hidden = false;
+          out.textContent = JSON.stringify(_lastRows, null, 2);
+        }
+      }
+
+      viewToggle.onclick = (e) => {
+        const btn = e.target.closest("button[data-view]");
+        if (!btn || btn.disabled) return;
+        _lastView = btn.dataset.view;
+        viewToggle.querySelectorAll("button").forEach(b =>
+          b.classList.toggle("active", b === btn)
+        );
+        rerenderCurrent();
+      };
+
+      // -- Export (CSV / JSON of the current rows) -------------------------
+      function downloadBlob(data, mime, filename) {
+        const blob = new Blob([data], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = filename; a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      function rowsToCsv(rows) {
+        if (!rows.length) return "";
+        // Union of keys across rows so we don't drop columns that only
+        // appear later. Nested values are JSON-serialized in the cell.
+        const cols = Array.from(
+          rows.reduce((s, r) => { Object.keys(r).forEach(k => s.add(k)); return s; },
+                      new Set())
+        );
+        const esc = (v) => {
+          if (v === null || v === undefined) return "";
+          const s = typeof v === "object" ? JSON.stringify(v) : String(v);
+          // RFC 4180 CSV quoting: wrap if comma/quote/newline; double internal quotes.
+          return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+        };
+        const lines = [cols.join(",")];
+        for (const r of rows) lines.push(cols.map(c => esc(r[c])).join(","));
+        return lines.join("\n");
+      }
+      exportBar.onclick = (e) => {
+        const btn = e.target.closest("button[data-export]");
+        if (!btn || !_lastRows.length) return;
+        const coll = sel.value || "query";
+        const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+        if (btn.dataset.export === "csv") {
+          downloadBlob(rowsToCsv(_lastRows), "text/csv",
+                       `mongosemantic-${coll}-${stamp}.csv`);
+        } else {
+          downloadBlob(JSON.stringify(_lastRows, null, 2), "application/json",
+                       `mongosemantic-${coll}-${stamp}.json`);
+        }
+      };
+
+      // -- Run --------------------------------------------------------------
       $("#query-run").onclick = async () => {
         let pipeline;
         try { pipeline = JSON.parse(ta.value); }
-        catch { toast(CONTENT.aggregation.error_rejected.replace("{reason}", "invalid JSON")); return; }
+        catch (parseErr) {
+          stats.hidden = true;
+          viewToggle.hidden = true;
+          exportBar.hidden = true;
+          tableWrap.hidden = true;
+          out.hidden = false;
+          out.textContent = CONTENT.aggregation.error_rejected.replace("{reason}", "invalid JSON: " + parseErr.message);
+          return;
+        }
         const collection = sel.value;
         if (!collection) { toast("collection is required"); return; }
+        const runBtn = $("#query-run");
+        const orig = runBtn.textContent;
+        runBtn.disabled = true; runBtn.textContent = "Running…";
         try {
           const r = await fetchJson(
             "POST",
             `/api/collections/${encodeURIComponent(collection)}/aggregation`,
             { pipeline },
           );
-          out.textContent = JSON.stringify(r.rows, null, 2);
+          _lastRows = r.rows || [];
+          stats.hidden = false;
+          stats.textContent =
+            `${_lastRows.length} row${_lastRows.length === 1 ? "" : "s"} ` +
+            `in ${r.took_ms ?? "—"} ms` +
+            (r.truncated ? ` · capped at ${r.limit}` : "");
+          if (_lastRows.length === 0) {
+            viewToggle.hidden = true;
+            exportBar.hidden = true;
+            tableWrap.hidden = true;
+            out.hidden = false;
+            out.textContent = "[]  (no rows)";
+            return;
+          }
+          viewToggle.hidden = false;
+          exportBar.hidden = false;
+          // Default to table view when possible; renderTable falls back to
+          // JSON automatically for nested rows.
+          _lastView = "table";
+          viewToggle.querySelectorAll("button").forEach(b =>
+            b.classList.toggle("active", b.dataset.view === "table")
+          );
+          rerenderCurrent();
         } catch (e) {
+          stats.hidden = true;
+          viewToggle.hidden = true;
+          exportBar.hidden = true;
+          tableWrap.hidden = true;
+          out.hidden = false;
           out.textContent = CONTENT.aggregation.error_rejected.replace("{reason}", e.message);
+        } finally {
+          runBtn.disabled = false;
+          runBtn.textContent = orig;
         }
       };
     },

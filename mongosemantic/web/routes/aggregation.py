@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Path
@@ -42,6 +43,7 @@ def aggregation(name: str = Path(...), req: AggregationRequest = ...) -> dict:
         raise HTTPException(status_code=400, detail=str(e)) from e
     settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
+    started = time.perf_counter()
     try:
         cursor = conn.db[name].aggregate(req.pipeline, maxTimeMS=MAX_TIME_MS)
         rows: list[dict] = []
@@ -49,6 +51,11 @@ def aggregation(name: str = Path(...), req: AggregationRequest = ...) -> dict:
             if i >= MAX_DOCS:
                 break
             rows.append(_stringify(doc))
-        return {"rows": rows, "limit": MAX_DOCS, "truncated": len(rows) >= MAX_DOCS}
+        return {
+            "rows": rows,
+            "limit": MAX_DOCS,
+            "truncated": len(rows) >= MAX_DOCS,
+            "took_ms": int((time.perf_counter() - started) * 1000),
+        }
     finally:
         conn.close()

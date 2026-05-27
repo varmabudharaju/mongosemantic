@@ -336,20 +336,49 @@
       <aside class="page-help">
         <strong>How to use</strong>
         <ol>
-          <li>Pick a collection from the dropdown (any collection, not just configured ones).</li>
-          <li>Write a MongoDB aggregation pipeline as a JSON array of stages.</li>
+          <li>Pick a collection (any collection — not just configured ones).</li>
+          <li>Pick a quick example or write a pipeline as a JSON array of stages.</li>
           <li>Click <em>Run</em>. Hard limits: 10-second timeout, 100-row result cap.</li>
-          <li>Blocked stages: <code>$out</code>, <code>$merge</code>, <code>$function</code>, <code>$accumulator</code>, <code>$where</code>, <code>$jsonSchema</code>.</li>
+          <li>Blocked at parse time: <code>$out</code>, <code>$merge</code>, <code>$function</code>, <code>$accumulator</code>, <code>$where</code>, <code>$jsonSchema</code>.</li>
         </ol>
-        <span class="try-line"><strong>Try on <code>movies</code>:</strong> <code>[{"$group": {"_id": "$genres", "n": {"$sum": 1}}}, {"$sort": {"n": -1}}, {"$limit": 10}]</code></span>
       </aside>
       <p  data-content="aggregation.safety_banner" id="query-banner"></p>
-      <label for="query-collection">Collection</label>
-      <select id="query-collection"></select>
+      <div class="query-controls">
+        <label class="query-control">
+          <span>Collection</span>
+          <select id="query-collection"></select>
+        </label>
+        <label class="query-control">
+          <span>Quick example</span>
+          <select id="query-example">
+            <option value="">— pick one to insert —</option>
+            <option value="sample">Sample 5 documents</option>
+            <option value="count">Count all documents</option>
+            <option value="group">Group by a field (top 10)</option>
+            <option value="top">Top 10 by a numeric field</option>
+            <option value="distinct">Distinct values + counts</option>
+          </select>
+        </label>
+      </div>
       <label for="query-pipeline" style="margin-top:12px">Pipeline (JSON array of stages)</label>
-      <textarea id="query-pipeline" data-default="aggregation.default_pipeline" rows="10"></textarea>
-      <div style="margin-top:12px"><button id="query-run" data-content="aggregation.btn_run"></button></div>
-      <pre id="query-results"></pre>
+      <textarea id="query-pipeline" data-default="aggregation.default_pipeline" rows="10"
+                placeholder='[{"$sample": {"size": 5}}]'></textarea>
+      <div class="query-actions">
+        <button id="query-run" data-content="aggregation.btn_run"></button>
+        <span id="query-stats" class="query-stats" hidden></span>
+        <span class="query-view-toggle" id="query-view-toggle" hidden>
+          <button type="button" data-view="table" class="active">Table</button>
+          <button type="button" data-view="json">JSON</button>
+        </span>
+        <span class="query-export" id="query-export" hidden>
+          <button type="button" data-export="csv">CSV</button>
+          <button type="button" data-export="json">JSON</button>
+        </span>
+      </div>
+      <div id="query-results-wrap">
+        <div id="query-results-table" class="table-wrap" hidden><table id="query-table"></table></div>
+        <pre id="query-results"></pre>
+      </div>
     </section>
 
     <section id="page-dashboard" hidden>
