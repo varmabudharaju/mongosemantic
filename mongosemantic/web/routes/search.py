@@ -128,7 +128,8 @@ def _csv_stream(rows: list[dict]):
     writer.writeheader()
     yield buf.getvalue().encode("utf-8")
     for row in rows:
-        buf.seek(0); buf.truncate(0)
+        buf.seek(0)
+        buf.truncate(0)
         writer.writerow(_row_to_export_dict(row))
         yield buf.getvalue().encode("utf-8")
 

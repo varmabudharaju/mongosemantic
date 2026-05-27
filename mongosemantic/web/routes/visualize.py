@@ -15,6 +15,7 @@ All numpy, no sklearn dep — K-means here is ~50 lines and fine up to
 """
 from __future__ import annotations
 
+import contextlib
 import re
 from collections import Counter
 
@@ -31,18 +32,7 @@ router = APIRouter()
 
 # Minimal English stopword list, enough for free-text in product/review
 # datasets. Kept inline (not a dep) so this module stays self-contained.
-_STOPWORDS = frozenset("""
-a about above after again against all am an and any are as at be because been
-before being below between both but by could did do does doing down during
-each few for from further had has have having he her here hers herself him
-himself his how i if in into is it its itself just me more most my myself no
-nor not now of off on once only or other our ours ourselves out over own same
-she should so some such than that the their theirs them themselves then there
-these they this those through to too under until up very was we were what
-when where which while who whom why will with would you your yours yourself
-yourselves can also like one two new well much many made via use using used
-get got really still maybe even though although however thus hence whilst
-""".split())
+_STOPWORDS = frozenset(["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "could", "did", "do", "does", "doing", "down", "during", "each", "few", "for", "from", "further", "had", "has", "have", "having", "he", "her", "here", "hers", "herself", "him", "himself", "his", "how", "i", "if", "in", "into", "is", "it", "its", "itself", "just", "me", "more", "most", "my", "myself", "no", "nor", "not", "now", "of", "off", "on", "once", "only", "or", "other", "our", "ours", "ourselves", "out", "over", "own", "same", "she", "should", "so", "some", "such", "than", "that", "the", "their", "theirs", "them", "themselves", "then", "there", "these", "they", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "we", "were", "what", "when", "where", "which", "while", "who", "whom", "why", "will", "with", "would", "you", "your", "yours", "yourself", "yourselves", "can", "also", "like", "one", "two", "new", "well", "much", "many", "made", "via", "use", "using", "used", "get", "got", "really", "still", "maybe", "even", "though", "although", "however", "thus", "hence", "whilst"])
 
 # Sampling cap. PCA itself scales fine; the limiter here is the JSON payload
 # back to the browser (~200 bytes per point including the text snippet).
@@ -99,11 +89,8 @@ def _pca_2d(matrix: np.ndarray) -> tuple[np.ndarray, float]:
         return centered[:, :2], 0.0
     top2 = vecs[:, -2:][:, ::-1]
     total = float(vals.sum())
-    if total <= 0:
-        var_pct = 0.0
-    else:
-        # eigh returns eigenvalues sorted ascending; the top two are the last.
-        var_pct = float(vals[-2:].sum() / total * 100.0)
+    # eigh returns eigenvalues sorted ascending; the top two are the last.
+    var_pct = 0.0 if total <= 0 else float(vals[-2:].sum() / total * 100.0)
     return centered @ top2, var_pct
 
 
@@ -155,7 +142,7 @@ def _cluster_keywords(
     """
     word_re = re.compile(r"[A-Za-z]{3,}")
     cluster_freq: list[Counter[str]] = [Counter() for _ in range(k)]
-    for text, lbl in zip(texts, labels):
+    for text, lbl in zip(texts, labels, strict=False):
         tokens = (t.lower() for t in word_re.findall(text or ""))
         cluster_freq[int(lbl)].update(t for t in tokens if t not in _STOPWORDS)
     # DF across clusters
@@ -306,10 +293,8 @@ def get_doc(name: str = Path(...), source_id: str = Path(...)) -> dict:
         # ObjectId is the common case; UUIDs and plain strings also valid.
         from bson import ObjectId
         candidates: list = [source_id]
-        try:
+        with contextlib.suppress(Exception):
             candidates.append(ObjectId(source_id))
-        except Exception:
-            pass
         for cand in candidates:
             doc = conn.db[name].find_one({"_id": cand})
             if doc is not None:

@@ -51,8 +51,12 @@ def test_visualize_returns_normalized_points(monkeypatch):
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["field"] == "body"
-        assert body["embedding_dim"] == 4
+        assert body["stats"]["embedding_dim"] == 4
+        assert body["stats"]["sample_size"] == 12
+        assert body["stats"]["k"] >= 2
         assert len(body["points"]) == 12
+        assert all("cluster" in p for p in body["points"])
+        assert isinstance(body.get("clusters"), list)
         for p in body["points"]:
             assert 0.0 <= p["x"] <= 1.0
             assert 0.0 <= p["y"] <= 1.0

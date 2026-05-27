@@ -17,7 +17,6 @@ shadow mode because the index management story is cleaner.
 """
 from __future__ import annotations
 
-import json
 import logging
 import threading
 import time

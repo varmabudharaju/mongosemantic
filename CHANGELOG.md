@@ -1,5 +1,101 @@
 # Changelog
 
+## 0.8.0 — 2026-05-27
+
+Headline: **fast search on plain Mongo, zero-friction worker, much
+more useful dashboards.** A single `mongosemantic ui` is now enough —
+no second terminal for `worker`, no Atlas required for ~15 ms search.
+
+### Performance — embedded HNSW vector index
+
+- New `mongosemantic.search.hnsw_index.HnswIndexManager` wraps `hnswlib`
+  to serve `(collection, field, model)` shadow data as an HNSW graph.
+  On a 45k-chunk wines corpus we measured **2,400 ms brute-force →
+  ~15 ms HNSW** — about a 150× speedup, same top results.
+- Indexes persist under `~/.cache/mongosemantic/hnsw/`, lazy-load on
+  cold start, rebuild automatically when the staleness ratio crosses
+  5% with at least 60 s since the last build.
+- New CLI: `mongosemantic reindex-hnsw --collection NAME` (or `--all`)
+  forces a sweep.
+- `/api/search` tries HNSW first on non-Atlas topologies, falls back
+  to the existing brute-force aggregation when an index isn't loaded.
+  Atlas keeps using `$vectorSearch`.
+- `hnswlib>=0.8` added as a required dep.
+
+### Worker
+
+- **Embedded worker.** `mongosemantic ui` now spawns the worker in a
+  background thread by default. End users don't have to know about
+  the separate `worker` command. Pass `--no-worker` to opt out.
+- Supervisor watches the saved connection — switching connection in
+  the UI tears down the old worker and starts a fresh one.
+- **Per-collection model fix.** The worker used to load a single
+  global provider from `MONGOSEMANTIC_MODEL` and use it for every
+  job, silently producing wrong-dim vectors for collections
+  configured with a different model. Now a `ProviderRegistry` lazy-
+  loads each model the first time its jobs arrive; failed loads fail
+  only that model's jobs with a clear `last_error`.
+- Provider cache is shared between web routes and the worker — the
+  SentenceTransformer loads once per process instead of once per
+  search request. Warm-path latency dropped ~2 s.
+
+### CLI
+
+- New `--uri` / `--db` global flags on the `mongosemantic` root.
+  Precedence: flag > env var > saved config file. Partial input
+  errors loudly.
+
+### Web UI
+
+- **Inspect** — field-analysis table promoted above the fold, the
+  "Configure semantic search" CTA goes with it. Sample documents
+  moved to a scrollable list at the bottom; clicking any row slides
+  in a detail panel with the full pretty-printed JSON.
+- **Collection tabs** — when you're scoped to a collection, a
+  shared tab strip mounts: Inspect / Configure / Index / Search.
+  Search arriving via tab pre-selects the collection.
+- **Sidebar progress badge** — completion %, jobs/sec, worker
+  liveness dot (live/stale/down). Flashes "✓ All embedded" briefly
+  on busy → idle.
+- **Search**:
+  - Results: free-form number input (was a 1–100 slider).
+  - Min-score threshold slider with empty-state hint.
+  - Stats line: "N results in X ms · scores Y–Z".
+  - Click any row → slide-in detail panel with the full source doc.
+  - Visual score bar per row.
+  - **Export current results as CSV / JSONL / JSON** with a
+    streaming response and `Content-Disposition` filename.
+- **Indexing** — replaced the bare progress bar with a real
+  dashboard: tiles for completed / in flight / pending / failed;
+  worker liveness tile; per-field breakdown table; recent activity
+  feed (last N completes/failures); failed-jobs panel with error
+  text. Polls `/api/indexing/status` every 1.5 s. The page no
+  longer re-enqueues on every visit — auto-enqueue only when the
+  collection has never been indexed. Manual "Re-index now" button
+  surfaces in steady state.
+- **Query (aggregation)** — quick-example dropdown (Sample 5 /
+  Count / Group by / Top N / Distinct), pre-filled default
+  pipeline, Run button states, stats line with `took_ms`,
+  table-vs-JSON view toggle that auto-detects flat rows, and
+  CSV / JSON export of the current rows.
+- **Visualize** — was unlabeled dots. Now runs K-means on the full
+  embeddings (configurable 4–20 clusters), TF-IDF keyword
+  extraction with domain-stopword filtering, colored dots by
+  cluster, right-rail legend with size % + click-to-highlight,
+  click-any-dot detail panel, and a stats line including the
+  variance captured by the top two PCA components.
+
+### Scripts
+
+- `scripts/seed_wines.py` — 130k Wine Reviews dataset from the
+  TidyTuesday GitHub mirror, no Kaggle login. Mirrors `seed_mflix.py`
+  with `--wipe`, `--from-file`, `--limit`.
+
+### Docs
+
+- README topology matrix rewritten: realistic scale targets per
+  topology, embedded-HNSW path documented, `reindex-hnsw` flagged.
+
 ## 0.7.1 — 2026-05-19
 
 - **Live indexing visibility.** Dashboard gets a new "Indexing activity"

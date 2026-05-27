@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 
@@ -9,7 +10,6 @@ from fastapi.responses import JSONResponse
 from mongosemantic import __version__
 from mongosemantic.search.hnsw_index import HnswIndexManager
 from mongosemantic.web.content import CONTENT
-from mongosemantic.worker.runner import ProviderRegistry
 from mongosemantic.web.routes import aggregation as _aggregation_routes
 from mongosemantic.web.routes import apply as _apply_routes
 from mongosemantic.web.routes import collections as _collections_routes
@@ -25,7 +25,7 @@ from mongosemantic.web.security import (
     install_rate_limit,
     install_security_headers,
 )
-
+from mongosemantic.worker.runner import ProviderRegistry
 
 log = logging.getLogger("mongosemantic.web")
 
@@ -113,10 +113,8 @@ def create_app() -> FastAPI:
     def _shutdown() -> None:
         # Drop any HNSW indexes from memory. Files on disk remain so the
         # next process boots quickly from the cache.
-        try:
+        with contextlib.suppress(Exception):
             app.state.hnsw._indexes.clear()
-        except Exception:
-            pass
 
     app.include_router(_system_routes.router)
     app.include_router(_collections_routes.router)

@@ -17,6 +17,7 @@ search documents that were embedded earlier.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 import time
@@ -197,7 +198,5 @@ class EmbeddedWorkerSupervisor:
             log.info("embedded worker started against %s/%s", identity.uri, identity.database)
         except Exception:
             log.exception("embedded worker: failed to start; will retry")
-            try:
+            with contextlib.suppress(Exception):
                 conn.close()
-            except Exception:
-                pass
