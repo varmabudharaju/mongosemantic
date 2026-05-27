@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from mongosemantic.commands.search import _run_one, hybrid_available, run_one_hybrid
 from mongosemantic.config import Settings
-from mongosemantic.db.client import MongoConnection
+from mongosemantic.db.client import MongoConnection, Topology
 from mongosemantic.search.cross_collection import min_max_normalize, per_collection_targets
 from mongosemantic.state import load_config
 from mongosemantic.web.identifiers import IdentifierError, validate_identifier
@@ -120,10 +120,38 @@ def search(
                 qvec_cache[model] = prov.embed(q).tolist()
             return qvec_cache[model]
 
+        hnsw = getattr(request.app.state, "hnsw", None)
+
+        def _try_hnsw(cfg, qv) -> list[dict] | None:
+            """Fan out across configured fields, query each HNSW, merge.
+
+            Returns None if ANY field is missing an index — falling back
+            to the brute-force path then is safer than mixing fast hits
+            from one field with no hits from another and pretending it's
+            the full top-k.
+            """
+            if hnsw is None or cfg.mode != "shadow":
+                return None
+            merged: list[dict] = []
+            for spec in cfg.fields:
+                rows = hnsw.query(db, cfg, spec.path, qv, limit)
+                if rows is None:
+                    return None
+                merged.extend(rows)
+            merged.sort(key=lambda r: r.get("score", 0), reverse=True)
+            return merged[:limit]
+
         def _run(cfg, name):
             qv = _qvec(cfg.embedding_model)
             if hybrid and hybrid_available(cfg, conn.topology):
                 return run_one_hybrid(db, cfg, name, q, qv, limit, conn.topology)
+            # Non-Atlas shadow setups try HNSW first; brute-force agg is
+            # the universal fallback for inline mode, missing indexes, or
+            # any unexpected runtime error inside the HNSW path.
+            if conn.topology != Topology.ATLAS:
+                fast = _try_hnsw(cfg, qv)
+                if fast is not None:
+                    return fast
             return _run_one(db, cfg, name, qv, limit, conn.topology)
 
         if collection:
