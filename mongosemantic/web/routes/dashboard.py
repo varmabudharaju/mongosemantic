@@ -85,7 +85,21 @@ def jobs_status() -> dict:
         return {"jobs": {}, "not_connected": True}
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
-        return {"jobs": count_by_status(conn.db)}
+        # Surface the most recent heartbeat so the global queue badge can
+        # tell "worker idle" from "worker down". Older entries are kept on
+        # the Dashboard page itself.
+        latest = None
+        for hb in list_heartbeats(conn.db):
+            if latest is None or hb.last_heartbeat > latest.last_heartbeat:
+                latest = hb
+        worker = None
+        if latest is not None:
+            worker = {
+                "worker_id": latest.worker_id,
+                "last_heartbeat": latest.last_heartbeat.isoformat(),
+                "jobs_processed": latest.jobs_processed,
+            }
+        return {"jobs": count_by_status(conn.db), "worker": worker}
     finally:
         conn.close()
 

@@ -1172,26 +1172,60 @@
     } catch { /* sidebar footer just stays as the placeholder */ }
 
     // Global queue indicator — visible from any page, every 5s.
+    // Shows: progress fraction + percent while work pending or in-flight,
+    // worker liveness via dot color (green=fresh heartbeat, red=stale,
+    // amber=no worker seen). Briefly flashes "All embedded" on completion
+    // before going silent.
+    let _lastBusy = false;
+    let _flashUntil = 0;
+    const HEARTBEAT_FRESH_S = 30;
     const pollQueue = async () => {
       try {
         const s = await fetchJson("GET", "/api/jobs/status");
-        const pending = (s.jobs && s.jobs.pending) || 0;
-        const inflight = (s.jobs && s.jobs.in_flight) || 0;
-        const failed = (s.jobs && s.jobs.failed) || 0;
+        const j = s.jobs || {};
+        const pending = j.pending || 0;
+        const inflight = j.in_flight || 0;
+        const failed = j.failed || 0;
+        const completed = j.completed || 0;
+        const total = pending + inflight + failed + completed;
+        const busy = pending > 0 || inflight > 0;
         const link = $("#sidebar-queue");
         const text = $("#sidebar-queue-text");
         const dot = $("#sidebar-queue-dot");
         if (!link) return;
-        if (pending || inflight || failed) {
+
+        // Worker heartbeat freshness — colors the dot when there's work
+        // happening so users can tell "worker idle" from "worker down".
+        let dotColor = "var(--mdb-leaf)";
+        if (s.worker && s.worker.last_heartbeat) {
+          const ageS = (Date.now() - Date.parse(s.worker.last_heartbeat)) / 1000;
+          dotColor = ageS < HEARTBEAT_FRESH_S ? "var(--mdb-leaf)" : "var(--mdb-bad)";
+        } else if (busy) {
+          // Jobs queued but no worker has ever heartbeat — worker is down.
+          dotColor = "var(--mdb-bad)";
+        }
+        if (failed) dotColor = "var(--mdb-bad)";
+
+        // Flash "All embedded" for 5s when transitioning busy → idle.
+        if (_lastBusy && !busy) _flashUntil = Date.now() + 5000;
+        _lastBusy = busy;
+
+        if (busy || failed) {
           link.style.display = "block";
           const parts = [];
+          if (total > 0) {
+            const done = completed;
+            const pct = Math.floor((done / total) * 100);
+            parts.push(`${done.toLocaleString()} / ${total.toLocaleString()} (${pct}%)`);
+          }
           if (inflight) parts.push(`${inflight} running`);
-          if (pending) parts.push(`${pending} pending`);
           if (failed) parts.push(`${failed} failed`);
           text.textContent = parts.join(" · ");
-          dot.style.background = failed
-            ? "var(--mdb-bad)"
-            : inflight ? "var(--mdb-leaf)" : "var(--mdb-warn)";
+          dot.style.background = dotColor;
+        } else if (Date.now() < _flashUntil && total > 0) {
+          link.style.display = "block";
+          text.textContent = `✓ All embedded (${completed.toLocaleString()})`;
+          dot.style.background = "var(--mdb-leaf)";
         } else {
           link.style.display = "none";
         }
