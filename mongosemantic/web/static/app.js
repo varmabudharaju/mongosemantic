@@ -931,10 +931,9 @@
       const hybridBox = $("#search-hybrid");
       const limitInput = $("#search-limit");
       const minScoreInput = $("#search-min-score");
-      const limitValue = $("#search-limit-value");
       const minScoreValue = $("#search-min-score-value");
-      // Sync slider value labels live.
-      limitInput.oninput = () => { limitValue.textContent = limitInput.value; };
+      // Min-score is still a slider — keep its live label in sync. The
+      // Results input is now a free-form number, so no label to update.
       minScoreInput.oninput = () => {
         minScoreValue.textContent = Number(minScoreInput.value).toFixed(2);
       };

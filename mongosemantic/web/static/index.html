@@ -263,9 +263,11 @@
           <input id="search-hybrid" type="checkbox">
           <span>Hybrid (semantic + keyword)</span>
         </label>
-        <label class="search-slider">
-          <span>Results: <strong id="search-limit-value">10</strong></span>
-          <input id="search-limit" type="range" min="1" max="100" step="1" value="10">
+        <label class="search-limit">
+          <span>Results</span>
+          <input id="search-limit" type="number" min="1" step="1" value="10"
+                 inputmode="numeric"
+                 title="How many results to return. Capped server-side at whatever's actually indexed.">
         </label>
         <label class="search-slider">
           <span>Min score: <strong id="search-min-score-value">0.00</strong></span>

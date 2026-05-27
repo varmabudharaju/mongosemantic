@@ -85,7 +85,11 @@ def search(
     request: Request,
     q: str = Query(..., min_length=1, max_length=2000),
     collection: str | None = Query(None),
-    limit: int = Query(10, ge=1, le=100),
+    # The HNSW / brute paths each clamp to the actual row count, so asking
+    # for more than exists is harmless — we just get back what's there. The
+    # 100k ceiling is a sanity guard against runaway client inputs, not a
+    # product cap.
+    limit: int = Query(10, ge=1, le=100_000),
     hybrid: bool = Query(False),
     min_score: float = Query(0.0, ge=0.0, le=1.0),
 ) -> dict:
