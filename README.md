@@ -106,8 +106,8 @@ Eleven tools are exposed:
 - [x] Real chunking — long documents split into overlapping chunks, search ranks per chunk
 - [x] Bulk-embed existing documents
 - [x] Sync in real time (change streams) or on a schedule (polling)
-- [x] Search via native Atlas `$vectorSearch` or brute-force aggregation
-- [x] CLI: inspect / apply / index / search / worker / status / retry / reindex / **ui** / **serve** / **integrate**
+- [x] Search via native Atlas `$vectorSearch`, embedded HNSW (non-Atlas), or brute-force aggregation
+- [x] CLI: inspect / apply / index / search / worker / status / retry / reindex / **reindex-hnsw** / **ui** / **serve** / **integrate**
 - [x] Web UI with seven pages and a safe aggregation runner
 - [x] **MCP server** for Claude Desktop / Cursor / any MCP client (stdio + SSE)
 - [x] **Atlas hybrid search** — semantic + keyword via `$rankFusion` (`--hybrid` / UI toggle / `hybrid_search` MCP tool)
@@ -141,13 +141,22 @@ Select via `MONGOSEMANTIC_MODEL` or `--model` on `apply`.
 
 ## Deployment topologies
 
-| Topology | Sync | Search |
-|---|---|---|
-| **Atlas** | Change streams | `$vectorSearch` (native) |
-| **Self-hosted replica set** | Change streams | Brute-force aggregation |
-| **Self-hosted standalone** | Polling (`updated_at` watermark) | Brute-force aggregation |
+| Topology | Sync | Search (shadow mode) | Search (inline mode) | Realistic scale |
+|---|---|---|---|---|
+| **Atlas** | Change streams | `$vectorSearch` (HNSW, native) | `$vectorSearch` | Millions |
+| **Self-hosted replica set** | Change streams | **Embedded HNSW** (in-process) | Brute-force aggregation | Hundreds of thousands |
+| **Self-hosted standalone** | Polling (`updated_at` watermark) | **Embedded HNSW** (in-process) | Brute-force aggregation | Hundreds of thousands |
 
-Brute-force is fine up to ~100k chunks. For larger self-hosted collections, Atlas is recommended.
+**Embedded HNSW**: when you run `mongosemantic ui` against a non-Atlas
+cluster, an HNSW graph is built from the shadow collection in a
+background thread and persisted under `~/.cache/mongosemantic/hnsw/`.
+Queries hit the graph at ~O(log N) — ~15 ms warm on 45k chunks vs
+~2.5 s brute-force. Indexes rebuild automatically when enough rows
+go stale; force a rebuild with `mongosemantic reindex-hnsw --all`.
+
+Inline-mode collections still take the brute-force path on non-Atlas
+(HNSW for inline is a follow-up). For datasets in the hundreds of
+thousands, prefer shadow mode or Atlas.
 
 ## Development
 

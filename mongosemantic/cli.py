@@ -46,6 +46,7 @@ from mongosemantic.commands import inspect as _inspect_mod  # noqa: E402
 from mongosemantic.commands import integrate as _integrate_mod  # noqa: E402
 from mongosemantic.commands import migrate as _migrate_mod  # noqa: E402
 from mongosemantic.commands import reindex as _reindex_mod  # noqa: E402
+from mongosemantic.commands import reindex_hnsw as _reindex_hnsw_mod  # noqa: E402
 from mongosemantic.commands import retry as _retry_mod  # noqa: E402
 from mongosemantic.commands import search as _search_mod  # noqa: E402
 from mongosemantic.commands import serve as _serve_mod  # noqa: E402
@@ -60,6 +61,7 @@ app.command("search")(_search_mod.search_cmd)
 app.command("status")(_status_mod.status_cmd)
 app.command("retry")(_retry_mod.retry_cmd)
 app.command("reindex")(_reindex_mod.reindex_cmd)
+app.command("reindex-hnsw")(_reindex_hnsw_mod.reindex_hnsw_cmd)
 app.command("ui")(_ui_mod.ui_cmd)
 app.command("serve")(_serve_mod.serve_cmd)
 app.command("integrate")(_integrate_mod.integrate_cmd)
