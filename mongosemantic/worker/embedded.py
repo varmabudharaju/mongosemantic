@@ -24,11 +24,10 @@ from dataclasses import dataclass
 
 from mongosemantic.config import Settings
 from mongosemantic.db.client import MongoConnection, Topology
-from mongosemantic.embeddings.provider import get_provider
 from mongosemantic.state import ensure_indexes, list_configured
 from mongosemantic.sync.change_stream import ChangeStreamListener
 from mongosemantic.sync.polling import poll_once
-from mongosemantic.worker.runner import WorkerRunner
+from mongosemantic.worker.runner import ProviderRegistry, WorkerRunner
 
 log = logging.getLogger("mongosemantic.embedded_worker")
 
@@ -52,9 +51,12 @@ class _RunningWorker:
     def __init__(self, conn: MongoConnection, identity: _Identity) -> None:
         self.conn = conn
         self.identity = identity
-        provider = get_provider(identity.model)
+        # Use a per-model registry so each collection's jobs are embedded
+        # with the model that was configured for it. The supervisor still
+        # restarts the worker on connection change, but model changes
+        # within a connection are now handled lazily, per job.
         ensure_indexes(conn.db)
-        self.runner = WorkerRunner(conn.db, provider)
+        self.runner = WorkerRunner(conn.db, ProviderRegistry())
         self.runner_thread = threading.Thread(
             target=self.runner.run, name="embed-worker", daemon=True
         )

@@ -4,13 +4,14 @@ import logging
 import threading
 import time
 import uuid
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
 from pymongo.database import Database
 
 from mongosemantic.db.queries import INLINE_ROOT, inline_field_key
-from mongosemantic.embeddings.provider import EmbeddingProvider
+from mongosemantic.embeddings.provider import EmbeddingProvider, get_provider
 from mongosemantic.state import (
     claim_batch,
     complete,
@@ -23,6 +24,49 @@ from mongosemantic.state import (
 HEARTBEAT_INTERVAL_S = 10.0
 
 log = logging.getLogger("mongosemantic.worker")
+
+
+class ProviderRegistry:
+    """Lazy, per-model provider cache used by `process_batch`.
+
+    A worker can process jobs across collections that use different
+    embedding models. Loading providers lazily (and remembering which
+    ones failed to load) keeps a missing OpenAI key or unreachable
+    Ollama from stopping work on the models that *do* work.
+    """
+
+    def __init__(self) -> None:
+        self._cache: dict[str, EmbeddingProvider] = {}
+        self._failed: dict[str, str] = {}  # model_key → reason
+
+    def get(self, model_key: str) -> EmbeddingProvider | None:
+        if model_key in self._cache:
+            return self._cache[model_key]
+        if model_key in self._failed:
+            return None
+        try:
+            self._cache[model_key] = get_provider(model_key)
+            return self._cache[model_key]
+        except Exception as e:
+            log.exception("failed to load provider for model %r", model_key)
+            self._failed[model_key] = str(e)
+            return None
+
+    def reason(self, model_key: str) -> str:
+        return self._failed.get(model_key, "unknown error")
+
+
+class _SingleProviderRegistry(ProviderRegistry):
+    """Adapter so legacy callers passing a single provider keep working.
+
+    The provider serves any model whose key matches `provider.model_name`;
+    other models load lazily through the normal path.
+    """
+
+    def __init__(self, provider: EmbeddingProvider) -> None:
+        super().__init__()
+        if getattr(provider, "model_name", None):
+            self._cache[provider.model_name] = provider
 
 
 def _utcnow() -> datetime:
@@ -110,8 +154,23 @@ def _handle_delete(db: Database, cfg_cache: dict, job: dict) -> None:
 
 
 def process_batch(
-    db: Database, provider: EmbeddingProvider, worker_id: str, batch_size: int
+    db: Database,
+    provider: EmbeddingProvider | ProviderRegistry,
+    worker_id: str,
+    batch_size: int,
 ) -> int:
+    """Claim and process up to `batch_size` jobs.
+
+    `provider` may be either a single EmbeddingProvider (legacy) or a
+    ProviderRegistry. With a registry, embed jobs are grouped by model
+    so a worker can serve collections configured with different models
+    in a single pass. If a model's provider can't be loaded, only that
+    model's jobs are failed — others continue.
+    """
+    if isinstance(provider, ProviderRegistry):
+        registry = provider
+    else:
+        registry = _SingleProviderRegistry(provider)
     batch = claim_batch(db, worker_id, batch_size)
     if not batch:
         return 0
@@ -125,16 +184,31 @@ def process_batch(
         except Exception as e:
             log.exception("delete failed")
             fail(db, job["_id"], reason=str(e))
-    if embed_jobs:
-        texts = [j["input_text"] for j in embed_jobs]
+    # Group embed jobs by the model recorded on the job (set at enqueue
+    # time from the collection's config). Each group is embedded with its
+    # own provider — never with a substitute, never silently.
+    by_model: dict[str, list[dict]] = defaultdict(list)
+    for j in embed_jobs:
+        by_model[j.get("model") or ""].append(j)
+    for model_key, jobs in by_model.items():
+        prov = registry.get(model_key) if model_key else None
+        if prov is None:
+            reason = (
+                f"no provider for model {model_key!r}: {registry.reason(model_key)}"
+                if model_key else "job has no model"
+            )
+            for job in jobs:
+                fail(db, job["_id"], reason=reason)
+            continue
+        texts = [j["input_text"] for j in jobs]
         try:
-            vectors = provider.embed_batch(texts)
+            vectors = prov.embed_batch(texts)
         except Exception as e:
-            log.exception("embed_batch failed")
-            for job in embed_jobs:
-                fail(db, job["_id"], reason=f"embed: {e}")
-            return len(batch)
-        for job, vec in zip(embed_jobs, vectors, strict=False):
+            log.exception("embed_batch failed for model %s", model_key)
+            for job in jobs:
+                fail(db, job["_id"], reason=f"embed ({model_key}): {e}")
+            continue
+        for job, vec in zip(jobs, vectors, strict=False):
             try:
                 _write_embedding(db, cfg_cache, job, vec.tolist())
                 complete(db, job["_id"])
@@ -148,12 +222,19 @@ class WorkerRunner:
     def __init__(
         self,
         db: Database,
-        provider: EmbeddingProvider,
+        provider: EmbeddingProvider | ProviderRegistry,
         batch_size: int = 32,
         idle_sleep: float = 2.0,
     ) -> None:
         self.db = db
-        self.provider = provider
+        # Wrap a single provider so the runner always operates against a
+        # ProviderRegistry — keeps the lazy-load behavior consistent
+        # whether callers pass one or the other.
+        self.provider: ProviderRegistry = (
+            provider
+            if isinstance(provider, ProviderRegistry)
+            else _SingleProviderRegistry(provider)
+        )
         self.batch_size = batch_size
         self.idle_sleep = idle_sleep
         self.worker_id = f"worker-{uuid.uuid4().hex[:8]}"

@@ -8,11 +8,10 @@ from rich.console import Console
 
 from mongosemantic.config import Settings
 from mongosemantic.db.client import MongoConnection, Topology
-from mongosemantic.embeddings.provider import get_provider
 from mongosemantic.state import ensure_indexes, list_configured
 from mongosemantic.sync.change_stream import ChangeStreamListener
 from mongosemantic.sync.polling import poll_once
-from mongosemantic.worker.runner import WorkerRunner, process_batch
+from mongosemantic.worker.runner import ProviderRegistry, WorkerRunner, process_batch
 
 console = Console()
 
@@ -33,7 +32,11 @@ def run_worker(poll_interval: int, batch_size: int, once: bool = False) -> None:
     conn = MongoConnection.open(settings.uri, settings.database)
     db = conn.db
     ensure_indexes(db)
-    provider = get_provider(settings.model)
+    # Per-collection model support: the registry lazy-loads each provider
+    # as jobs for that model arrive. `settings.model` is no longer used to
+    # pick a single global provider — that path silently embedded jobs
+    # configured for other models with the wrong vectors.
+    provider = ProviderRegistry()
     if once:
         # One-shot run: process all pending jobs, then exit. Skips change
         # streams / polling / heartbeat. Useful for cron, scripted demos,
