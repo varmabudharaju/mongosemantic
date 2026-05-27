@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
@@ -86,6 +87,7 @@ def search(
     collection: str | None = Query(None),
     limit: int = Query(10, ge=1, le=100),
     hybrid: bool = Query(False),
+    min_score: float = Query(0.0, ge=0.0, le=1.0),
 ) -> dict:
     if collection:
         try:
@@ -95,6 +97,7 @@ def search(
     settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     notice: str | None = None
+    started = time.perf_counter()
     try:
         db = conn.db
 
@@ -136,6 +139,17 @@ def search(
                 all_rows = min_max_normalize(all_rows, "score")
             all_rows.sort(key=lambda r: r.get("score", 0), reverse=True)
             rows = all_rows[:limit]
-        return {"query": q, "rows": [_serialize(r) for r in rows], "notice": notice}
+        # Apply score threshold AFTER ranking and limit so users still see
+        # the top N even if all are below threshold (we surface the gap in
+        # the UI rather than returning an empty list silently).
+        if min_score > 0:
+            rows = [r for r in rows if r.get("score", 0) >= min_score]
+        took_ms = int((time.perf_counter() - started) * 1000)
+        return {
+            "query": q,
+            "rows": [_serialize(r) for r in rows],
+            "notice": notice,
+            "took_ms": took_ms,
+        }
     finally:
         conn.close()

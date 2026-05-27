@@ -115,10 +115,10 @@
     return doc.title || doc.name || doc._id?.$oid?.slice(0, 8) || `Document ${(arguments[1] ?? 0) + 1}`;
   }
 
-  function openInspectDetail(idx) {
-    const doc = _sampleDocs[idx];
-    if (!doc) return;
-    $("#inspect-detail-title").textContent = _docLabel(doc, idx);
+  // Generic slide-in detail panel — used by Inspect (sample doc) and
+  // Search (result's source_doc). Title + pretty-printed JSON body.
+  function openDetailPanel(title, doc) {
+    $("#inspect-detail-title").textContent = title;
     $("#inspect-detail-body").textContent = JSON.stringify(doc, null, 2);
     $("#inspect-detail-backdrop").hidden = false;
     const panel = $("#inspect-detail-panel");
@@ -131,6 +131,12 @@
     const panel = $("#inspect-detail-panel");
     panel.hidden = true;
     panel.setAttribute("aria-hidden", "true");
+  }
+
+  function openInspectDetail(idx) {
+    const doc = _sampleDocs[idx];
+    if (!doc) return;
+    openDetailPanel(_docLabel(doc, idx), doc);
   }
 
   // Wire up the detail-panel handlers once (idempotent on re-runs).
@@ -910,15 +916,28 @@
 
     search: async ([scopedCollection]) => {
       mountCollectionTabs(scopedCollection, "search");
+      _ensureDetailPanelWired();
+      closeInspectDetail();
       const c = CONTENT.search;
       const empty = $("#search-empty");
       const results = $("#search-results");
       const notice = $("#search-notice");
+      const stats = $("#search-stats");
       empty.textContent = c.empty_no_query;
       results.innerHTML = "";
       notice.textContent = "";
+      stats.hidden = true;
       const sel = $("#search-collection");
       const hybridBox = $("#search-hybrid");
+      const limitInput = $("#search-limit");
+      const minScoreInput = $("#search-min-score");
+      const limitValue = $("#search-limit-value");
+      const minScoreValue = $("#search-min-score-value");
+      // Sync slider value labels live.
+      limitInput.oninput = () => { limitValue.textContent = limitInput.value; };
+      minScoreInput.oninput = () => {
+        minScoreValue.textContent = Number(minScoreInput.value).toFixed(2);
+      };
       try {
         const cols = await fetchJson("GET", "/api/collections");
         sel.innerHTML = `<option value="">${escapeHtml(c.selector_all)}</option>` +
@@ -928,35 +947,77 @@
       } catch { /* leave empty */ }
       const input = $("#search-q");
       input.placeholder = c.placeholder;
+
+      // Holds the rows from the last run so the click→detail handler can
+      // recover the full source_doc by index without round-tripping.
+      let _searchRows = [];
+      const onResultClick = (e) => {
+        const li = e.target.closest("li[data-idx]");
+        if (!li) return;
+        const row = _searchRows[Number(li.dataset.idx)];
+        if (!row) return;
+        const title = (row.source_doc && (row.source_doc.title || row.source_doc.name))
+          || `${row.source_collection} · ${row.field_path}`;
+        openDetailPanel(title, row.source_doc || row);
+      };
+      results.onclick = onResultClick;
+
       const run = async () => {
         const q = input.value.trim();
         if (!q) {
           results.innerHTML = ""; notice.textContent = "";
+          stats.hidden = true;
           empty.textContent = c.empty_no_query; return;
         }
         const goBtn = $("#search-go");
         const origLabel = goBtn.textContent;
         goBtn.textContent = "Searching…";
         goBtn.disabled = true;
-        const params = new URLSearchParams({ q });
+        const params = new URLSearchParams({ q, limit: limitInput.value });
         if (sel.value) params.set("collection", sel.value);
         if (hybridBox.checked) params.set("hybrid", "true");
+        if (Number(minScoreInput.value) > 0) params.set("min_score", minScoreInput.value);
         try {
           const r = await fetchJson("GET", "/api/search?" + params.toString());
           notice.textContent = r.notice || "";
-          if (!r.rows.length) { empty.textContent = c.empty_no_results; results.innerHTML = ""; return; }
+          _searchRows = r.rows || [];
+          if (!_searchRows.length) {
+            empty.textContent = c.empty_no_results;
+            results.innerHTML = "";
+            stats.hidden = false;
+            stats.textContent = `0 results in ${r.took_ms ?? "—"} ms` +
+              (Number(minScoreInput.value) > 0
+                ? ` — try lowering the min-score threshold (${Number(minScoreInput.value).toFixed(2)})`
+                : "");
+            return;
+          }
           empty.textContent = "";
-          results.innerHTML = r.rows.map(row => `<li>
-            <strong>${(row.score || 0).toFixed(3)}</strong>
-            <div>
-              <div class="meta">
-                <span class="coll">${escapeHtml(row.source_collection)}</span>
-                <span>·</span>
-                <span>${escapeHtml(row.field_path)}</span>
+          const scores = _searchRows.map(x => x.score || 0);
+          const top = Math.max(...scores), bot = Math.min(...scores);
+          stats.hidden = false;
+          stats.textContent =
+            `${_searchRows.length} result${_searchRows.length === 1 ? "" : "s"} ` +
+            `in ${r.took_ms ?? "—"} ms · scores ${bot.toFixed(3)}–${top.toFixed(3)} · ` +
+            `click any row to inspect the full document`;
+          results.innerHTML = _searchRows.map((row, idx) => {
+            const score = row.score || 0;
+            // Visual bar — score is already cosine-similarity-ish (0..1).
+            const barPct = Math.max(0, Math.min(100, score * 100));
+            return `<li data-idx="${idx}">
+              <strong>${score.toFixed(3)}</strong>
+              <div>
+                <div class="meta">
+                  <span class="coll">${escapeHtml(row.source_collection)}</span>
+                  <span>·</span>
+                  <span>${escapeHtml(row.field_path)}</span>
+                  ${row.chunk_index !== null && row.chunk_index !== undefined
+                    ? `<span>·</span><span>chunk ${row.chunk_index}</span>` : ""}
+                </div>
+                <div class="search-score-bar"><span style="width:${barPct}%"></span></div>
+                <p>${escapeHtml((row.chunk_text || "").slice(0, 300))}</p>
               </div>
-              <p>${escapeHtml((row.chunk_text || "").slice(0, 300))}</p>
-            </div>
-          </li>`).join("");
+            </li>`;
+          }).join("");
         } catch (e) {
           toast(e.message);
         } finally {
@@ -970,6 +1031,14 @@
       const rerunIfQuery = () => { if (input.value.trim()) run(); };
       sel.onchange = rerunIfQuery;
       hybridBox.onchange = rerunIfQuery;
+      // Debounce slider re-runs so dragging doesn't spam the server.
+      let _filterTimer = 0;
+      const debouncedRerun = () => {
+        clearTimeout(_filterTimer);
+        _filterTimer = setTimeout(rerunIfQuery, 250);
+      };
+      limitInput.addEventListener("change", debouncedRerun);
+      minScoreInput.addEventListener("change", debouncedRerun);
       input.focus();
     },
 
