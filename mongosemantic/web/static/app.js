@@ -613,9 +613,38 @@
     const hash = (location.hash || "#/connection").replace(/^#\//, "").split("/");
     const [page, ...args] = hash;
     if (!PAGES.includes(page)) { location.hash = "#/connection"; return; }
+    // Clean up any leftover collection tabs before the new handler runs;
+    // handlers that need them call mountCollectionTabs() themselves.
+    document.querySelectorAll(".collection-tabs").forEach(el => el.remove());
     showPage(page);
     handlers[page] && handlers[page](args.map(decodeURIComponent));
   };
+
+  // Shared tab strip rendered at the top of any page that's scoped to a
+  // single collection. Lets users jump between Inspect / Configure / Index
+  // / Search without losing the collection they were working on.
+  const COLLECTION_TABS = [
+    { page: "inspect",  label: "Inspect"   },
+    { page: "apply",    label: "Configure" },
+    { page: "indexing", label: "Index"     },
+    { page: "search",   label: "Search"    },
+  ];
+  function mountCollectionTabs(collection, currentPage) {
+    document.querySelectorAll(".collection-tabs").forEach(el => el.remove());
+    if (!collection) return;
+    const section = $(`#page-${currentPage}`);
+    if (!section) return;
+    const n = encodeURIComponent(collection);
+    const links = COLLECTION_TABS.map(t => {
+      const active = t.page === currentPage ? ' aria-current="page"' : "";
+      return `<a href="#/${t.page}/${n}"${active}>${t.label}</a>`;
+    }).join("");
+    const nav = document.createElement("nav");
+    nav.className = "collection-tabs";
+    nav.innerHTML = `<span class="collection-tabs-context">Collection · <strong>${escapeHtml(collection)}</strong></span>${links}`;
+    // Insert at the very top of the section, before the h2.
+    section.insertBefore(nav, section.firstChild);
+  }
 
   const handlers = {
     connection() { renderConnectionPage(); },
@@ -698,6 +727,7 @@
 
     inspect: async ([name]) => {
       if (!name) return;
+      mountCollectionTabs(name, "inspect");
       $("#inspect-title").textContent = CONTENT.inspect.title.replace("{collection}", name);
       $("#inspect-apply-link").href = `#/apply/${encodeURIComponent(name)}`;
       _ensureDetailPanelWired();
@@ -743,6 +773,7 @@
 
     apply: async ([name]) => {
       if (!name) { toast("Pick a collection from Collections first."); return; }
+      mountCollectionTabs(name, "apply");
       const f = $("#form-apply");
       const c = CONTENT.apply;
       // Try to load existing config — present? then this is a Reconfigure.
@@ -852,6 +883,7 @@
 
     indexing: async ([name]) => {
       if (!name) return;
+      mountCollectionTabs(name, "indexing");
       $("#indexing-title").textContent = CONTENT.indexing.title.replace("{collection}", name);
       const bar = $("#indexing-progress");
       const metric = $("#indexing-metric");
@@ -876,7 +908,8 @@
       } catch (e) { toast(e.message); }
     },
 
-    search: async () => {
+    search: async ([scopedCollection]) => {
+      mountCollectionTabs(scopedCollection, "search");
       const c = CONTENT.search;
       const empty = $("#search-empty");
       const results = $("#search-results");
@@ -891,6 +924,7 @@
         sel.innerHTML = `<option value="">${escapeHtml(c.selector_all)}</option>` +
           cols.collections.filter(x => x.status === "configured")
             .map(x => `<option value="${escapeHtml(x.name)}">${escapeHtml(x.name)}</option>`).join("");
+        if (scopedCollection) sel.value = scopedCollection;
       } catch { /* leave empty */ }
       const input = $("#search-q");
       input.placeholder = c.placeholder;
