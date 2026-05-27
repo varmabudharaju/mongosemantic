@@ -507,7 +507,28 @@
   `;
 
   // ---- visualize scatter -------------------------------------------------
+  // 12-step palette (tab10 + a few warm extras) — distinct under the green
+  // brand without going neon. Indexed by cluster id mod palette.length.
+  const _VIZ_PALETTE = [
+    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+    "#9467bd", "#8c564b", "#e377c2", "#17becf",
+    "#bcbd22", "#7f7f7f", "#ad494a", "#5254a3",
+  ];
   let _vizPoints = [];
+  let _vizClusters = [];           // [{id, size, keywords:[]}]
+  let _vizSelectedCluster = null;  // null = no filter; integer = highlight one
+  let _vizCurrentCollection = "";
+
+  function _vizColorFor(clusterId, dim = false) {
+    const base = _VIZ_PALETTE[(clusterId | 0) % _VIZ_PALETTE.length];
+    if (!dim) return base;
+    // Convert to rgba with 0.12 alpha for dimming.
+    const r = parseInt(base.slice(1, 3), 16);
+    const g = parseInt(base.slice(3, 5), 16);
+    const b = parseInt(base.slice(5, 7), 16);
+    return `rgba(${r},${g},${b},0.12)`;
+  }
+
   function drawScatter(points) {
     _vizPoints = points;
     const canvas = $("#viz-canvas");
@@ -520,41 +541,113 @@
     const ctx = canvas.getContext("2d");
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, rect.width, rect.height);
-    ctx.fillStyle = "rgba(0,104,74,0.55)";
-    ctx.strokeStyle = "rgba(0,30,43,0.6)";
     ctx.lineWidth = 0.5;
     const pad = 24;
     const w = rect.width - 2 * pad, h = rect.height - 2 * pad;
-    points.forEach(p => {
+    // Pass 1: dimmed (non-selected) points first so highlighted ones land
+    // on top. Skipped when nothing is selected.
+    const draw = (p) => {
       const cx = pad + p.x * w;
-      const cy = pad + (1 - p.y) * h;  // flip y so larger PCA-y = up
+      const cy = pad + (1 - p.y) * h;
       ctx.beginPath();
       ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
-    });
-    // Tooltip on hover.
+    };
+    if (_vizSelectedCluster !== null) {
+      ctx.strokeStyle = "transparent";
+      for (const p of points) {
+        if (p.cluster === _vizSelectedCluster) continue;
+        ctx.fillStyle = _vizColorFor(p.cluster, true);
+        draw(p);
+      }
+      ctx.strokeStyle = "rgba(0,30,43,0.7)";
+      ctx.lineWidth = 0.8;
+      for (const p of points) {
+        if (p.cluster !== _vizSelectedCluster) continue;
+        ctx.fillStyle = _vizColorFor(p.cluster);
+        draw(p);
+      }
+    } else {
+      ctx.strokeStyle = "rgba(0,30,43,0.5)";
+      for (const p of points) {
+        ctx.fillStyle = _vizColorFor(p.cluster);
+        draw(p);
+      }
+    }
+    // Tooltip on hover + click to open the detail panel.
     const tooltip = $("#viz-tooltip");
+    const nearestAt = (mx, my) => {
+      let best = null, bestDist = 12;
+      for (const p of _vizPoints) {
+        const cx = pad + p.x * w;
+        const cy = pad + (1 - p.y) * h;
+        const d = Math.hypot(cx - mx, cy - my);
+        if (d < bestDist) { best = { p, cx, cy }; bestDist = d; }
+      }
+      return best;
+    };
     canvas.onmousemove = (ev) => {
       const r = canvas.getBoundingClientRect();
-      const mx = ev.clientX - r.left, my = ev.clientY - r.top;
-      let nearest = null, nearestDist = 12; // px threshold
-      for (const p of _vizPoints) {
-        const cx = pad + p.x * (r.width - 2 * pad);
-        const cy = pad + (1 - p.y) * (r.height - 2 * pad);
-        const d = Math.hypot(cx - mx, cy - my);
-        if (d < nearestDist) { nearest = { p, cx, cy }; nearestDist = d; }
-      }
-      if (nearest) {
+      const hit = nearestAt(ev.clientX - r.left, ev.clientY - r.top);
+      if (hit) {
+        const kw = (_vizClusters[hit.p.cluster] || {}).keywords || [];
         tooltip.style.display = "block";
-        tooltip.style.left = (nearest.cx + 14) + "px";
-        tooltip.style.top  = (nearest.cy + 14) + "px";
-        tooltip.textContent = nearest.p.text || nearest.p.id;
+        tooltip.style.left = (hit.cx + 14) + "px";
+        tooltip.style.top = (hit.cy + 14) + "px";
+        tooltip.innerHTML =
+          `<div style="font-size:11px;opacity:0.7;margin-bottom:4px">` +
+          `cluster ${hit.p.cluster}${kw.length ? " — " + kw.join(", ") : ""}` +
+          `</div>` +
+          escapeHtml((hit.p.text || hit.p.id).slice(0, 280));
       } else {
         tooltip.style.display = "none";
       }
     };
     canvas.onmouseleave = () => { tooltip.style.display = "none"; };
+    canvas.onclick = async (ev) => {
+      const r = canvas.getBoundingClientRect();
+      const hit = nearestAt(ev.clientX - r.left, ev.clientY - r.top);
+      if (!hit || !_vizCurrentCollection) return;
+      _ensureDetailPanelWired();
+      try {
+        const d = await fetchJson(
+          "GET",
+          `/api/collections/${encodeURIComponent(_vizCurrentCollection)}/doc/${encodeURIComponent(hit.p.id)}`,
+        );
+        const doc = d.doc || {};
+        const title = doc.title || doc.name || `cluster ${hit.p.cluster} · ${hit.p.id}`;
+        openDetailPanel(title, doc);
+      } catch (e) {
+        toast(e.message);
+      }
+    };
+  }
+
+  function renderVizLegend(clusters, totalPoints) {
+    _vizClusters = clusters || [];
+    const list = $("#viz-legend-list");
+    if (!list) return;
+    list.innerHTML = (clusters || []).map(c => {
+      const pct = totalPoints ? Math.round((c.size / totalPoints) * 100) : 0;
+      const kw = (c.keywords || []).slice(0, 3).join(" · ") || "—";
+      const active = c.id === _vizSelectedCluster ? " active" : "";
+      return `<li class="viz-cluster${active}" data-cluster="${c.id}">
+        <span class="viz-cluster-swatch" style="background:${_vizColorFor(c.id)}"></span>
+        <div class="viz-cluster-body">
+          <div class="viz-cluster-keywords">${escapeHtml(kw)}</div>
+          <div class="viz-cluster-meta">${c.size.toLocaleString()} pts · ${pct}%</div>
+        </div>
+      </li>`;
+    }).join("");
+    list.onclick = (e) => {
+      const li = e.target.closest("li[data-cluster]");
+      if (!li) return;
+      const c = Number(li.dataset.cluster);
+      _vizSelectedCluster = _vizSelectedCluster === c ? null : c;
+      renderVizLegend(_vizClusters, totalPoints);
+      drawScatter(_vizPoints);
+    };
   }
 
   // ---- migrate modal ----------------------------------------------------
@@ -1489,12 +1582,18 @@
         sel.innerHTML = configured.map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join("");
       } catch (e) { toast(e.message); return; }
 
+      const sampleSel = $("#viz-sample");
+      const clustersSel = $("#viz-clusters");
       const render = async () => {
         const name = sel.value;
         if (!name) return;
+        _vizCurrentCollection = name;
+        _vizSelectedCluster = null;
+        meta.textContent = "Loading + clustering…";
         const params = new URLSearchParams();
         if (fieldSel.value) params.set("field", fieldSel.value);
-        params.set("sample", "1000");
+        params.set("sample", sampleSel.value || "5000");
+        params.set("clusters", clustersSel.value || "8");
         try {
           const v = await fetchJson("GET", `/api/collections/${encodeURIComponent(name)}/visualize?${params}`);
           // Populate field dropdown (only when first loading or after collection change)
@@ -1507,14 +1606,23 @@
           if (v.message) {
             meta.textContent = v.message;
             drawScatter([]);
+            renderVizLegend([], 0);
             return;
           }
-          meta.textContent = `${v.points.length} points · ${v.embedding_dim}-d → PCA to 2D`;
-          drawScatter(v.points);
+          const s = v.stats || {};
+          meta.innerHTML =
+            `<strong>${(v.points || []).length.toLocaleString()}</strong> points · ` +
+            `<strong>${s.embedding_dim || "?"}-d</strong> embeddings · ` +
+            `<strong>${s.k || "?"}</strong> clusters · ` +
+            `top-2 PCA captures <strong>${s.variance_explained_pct || 0}%</strong> of variance`;
+          drawScatter(v.points || []);
+          renderVizLegend(v.clusters || [], (v.points || []).length);
         } catch (e) { toast(e.message); }
       };
       sel.onchange = () => { fieldSel.dataset.collection = ""; render(); };
       fieldSel.onchange = render;
+      sampleSel.onchange = render;
+      clustersSel.onchange = render;
       $("#viz-refresh").onclick = render;
       await render();
     },

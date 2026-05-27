@@ -401,12 +401,30 @@
             <option value="50000">50k (all)</option>
           </select>
         </label>
+        <label style="display:inline-flex;align-items:center;gap:6px;margin:0;font-size:13px;color:var(--mdb-ink-muted)">
+          Clusters
+          <select id="viz-clusters">
+            <option value="4">4</option>
+            <option value="6">6</option>
+            <option value="8" selected>8</option>
+            <option value="10">10</option>
+            <option value="12">12</option>
+            <option value="16">16</option>
+          </select>
+        </label>
         <button id="viz-refresh" class="ghost">Refresh</button>
       </div>
-      <p id="viz-meta"></p>
-      <div id="viz-stage" class="card" style="padding:16px;position:relative;height:520px">
-        <canvas id="viz-canvas" style="width:100%;height:100%;display:block"></canvas>
-        <div id="viz-tooltip" style="position:absolute;display:none;background:#001E2B;color:#fff;padding:8px 12px;border-radius:8px;font-size:12px;max-width:320px;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,0.15)"></div>
+      <p id="viz-meta" class="viz-meta"></p>
+      <div class="viz-layout">
+        <div id="viz-stage" class="card" style="padding:16px;position:relative;height:520px">
+          <canvas id="viz-canvas" style="width:100%;height:100%;display:block;cursor:pointer"></canvas>
+          <div id="viz-tooltip" style="position:absolute;display:none;background:#001E2B;color:#fff;padding:8px 12px;border-radius:8px;font-size:12px;max-width:320px;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,0.15);z-index:5"></div>
+        </div>
+        <aside id="viz-legend" class="viz-legend">
+          <h3 class="viz-legend-title">Clusters</h3>
+          <p class="viz-legend-hint">Click a cluster to highlight. Click again to clear.</p>
+          <ul id="viz-legend-list"></ul>
+        </aside>
       </div>
       <p id="viz-empty"></p>
     </section>
