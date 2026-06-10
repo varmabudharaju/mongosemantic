@@ -112,54 +112,114 @@ movies collection makes every example in the next section reproducible.
 
 ## See it in action
 
-Every screenshot below is real and reproducible — `.capture.yaml` defines
-each shot and [`capture`](https://github.com/varmabudharaju/capture)` run`
-regenerates the full set against a seeded database.
+A tour of every feature, in the order you'd meet them. Every screenshot is
+real and reproducible — `.capture.yaml` defines each shot and
+[`capture`](https://github.com/varmabudharaju/capture)` run` regenerates
+the full set against a seeded database.
 [`docs/test-evidence-0.9.md`](docs/test-evidence-0.9.md) collects the
-feature-by-feature proof.
+feature-by-feature proof for the 0.9.0 search upgrades.
 
-### Semantic search
+### Connect — with topology detection
 
-Natural-language queries over any configured collection — from the CLI,
-the dashboard, or MCP. Results carry the matched chunk, a similarity
-score, and the full source document one click away.
+Paste a MongoDB URI (or rely on env vars) and mongosemantic detects what
+it's talking to — Atlas, self-hosted replica set, or standalone — and
+adapts everything downstream: which search engine to use, whether sync can
+use change streams or must poll, which indexes to create. The connection
+is saved once and shared by the CLI, the dashboard, and the MCP server.
+
+<img src="docs/screenshots/v1/01-connection.png" width="100%" alt="Connection page — connected to a self-hosted replica set with topology detection, saved-connection card, and developer help"/>
+
+### Browse collections
+
+Every collection in the database, with its configured/not-configured
+status at a glance. Configured collections show their embedding model and
+storage mode (shadow or inline); the rest are one click away from setup.
+The migrate action lives here too.
+
+<img src="docs/screenshots/v1/02-collections.png" width="100%" alt="Collections browser — configured collections show model and storage mode; the rest are one click from setup"/>
+
+### Inspect fields before you commit
+
+Embedding the wrong field wastes hours of compute. The inspect page scores
+every field of a collection for semantic-search suitability — text length,
+fill rate, type consistency — and shows sample documents underneath, so
+you pick the right fields the first time. Also available as
+`mongosemantic inspect -c <coll>` and the `inspect_collection` MCP tool.
+
+<img src="docs/screenshots/v1/03-inspect.png" width="100%" alt="Inspect page — every field of the movies collection scored for semantic-search suitability, with sample documents below"/>
+
+### Configure semantic search
+
+One form: discovered fields as checkboxes (with their suitability badges),
+shadow vs. inline storage, optional chunking for long documents, and the
+embedding model. On Atlas, `apply` auto-creates the vector and BM25 Search
+indexes; on every topology it creates the `$text` index that powers the
+hybrid keyword leg.
+
+<img src="docs/screenshots/v1/15-apply.png" width="100%" alt="Configure semantic search — discovered fields as checkboxes with suitability badges, shadow/inline mode, chunking, model picker"/>
+
+### Watch the indexing pipeline
+
+Bulk-embedding 23k documents shouldn't be a black box. The indexing
+dashboard shows completed / in-flight / pending / failed tiles, a live
+worker heartbeat, per-field progress bars, and a recent-activity feed —
+with retry and reindex one click away. The job queue is self-healing:
+stale in-flight jobs are reclaimed and dead worker heartbeats pruned
+automatically.
+
+<img src="docs/screenshots/v1/04-indexing.png" width="100%" alt="Indexing dashboard — completed/in-flight/pending/failed tiles, live worker dot, per-field progress, activity feed"/>
+
+### Search by meaning
+
+The core feature, everywhere you work. The web version is the hero shot at
+the top of this page; here is the same engine from the CLI — a
+meaning-only query finding Cold-War spy thrillers with no keyword overlap:
 
 <img src="docs/screenshots/v1/12-cli-search.png" width="100%" alt="CLI semantic search over 23k movie plots — finds Cold-War spy thrillers from a meaning-only query"/>
 
-### Metadata filtering
+### Open the full document behind a result
 
-Narrow any semantic search with a plain MongoDB query over the source
-documents — no reindex, works on every search path:
+Search results show the matched chunk and its score; clicking any row
+slides in the complete source document, so you never lose the connection
+between a match and the record it came from.
+
+<img src="docs/screenshots/v1/06-search-detail.png" width="100%" alt="Click any search result to slide in the full source document"/>
+
+### Filter with plain MongoDB queries
+
+Narrow any semantic search with a regular MongoDB query over the source
+documents — no reindex, no schema change, works on every search path:
 
 ```bash
 mongosemantic search "a detective hunting a serial killer" -c movies \
   --filter '{"year": {"$lt": 1960}}'
 ```
 
-The same noir query, constrained to pre-1960 — every modern serial-killer
-film drops out and the classics surface:
-
-<img src="docs/screenshots/v1/17-search-filter.png" width="100%" alt="Metadata filtering — the same noir query constrained to year < 1960 with a plain MongoDB filter; only pre-1960 classics return"/>
-
-Local paths (brute-force, embedded HNSW) pre-filter the matching `_id`s
-and are exact; Atlas paths over-fetch ×5 and post-match.
+The shot below is exactly that: the same noir query, constrained to
+pre-1960 — every modern serial-killer film drops out and the classics
+surface. Local paths (brute-force, embedded HNSW) pre-filter the matching
+`_id`s and are exact; Atlas paths over-fetch ×5 and post-match.
 `$where`/`$function`/`$accumulator`/`$text`/`$expr` are rejected; invalid
 filters error loudly (exit 2 on the CLI, HTTP 400 in the web UI).
 
-### Cross-encoder reranking
+<img src="docs/screenshots/v1/17-search-filter.png" width="100%" alt="Metadata filtering — the same noir query constrained to year < 1960 with a plain MongoDB filter; only pre-1960 classics return"/>
 
-Two-stage retrieval for noticeably better ordering: over-fetch limit×5
-candidates, re-score each (query, chunk) pair with a local cross-encoder
-(`cross-encoder/ms-marco-MiniLM-L-6-v2`, ~80 MB, CPU, loaded once per
-process), return the top hits. The original similarity is kept as
-`vector_score`:
+### Rerank with a local cross-encoder
+
+Vector similarity is a great first pass but a mediocre judge of final
+order. `--rerank` turns search into two-stage retrieval: over-fetch
+limit×5 candidates, re-score each (query, chunk) pair with a local
+cross-encoder (`cross-encoder/ms-marco-MiniLM-L-6-v2`, ~80 MB, CPU,
+loaded once per process), and return the top hits — original similarity
+kept as `vector_score`:
 
 ```bash
 mongosemantic search "a washed-up boxer gets one last shot at redemption" \
   -c movies --rerank
 ```
 
-Note the **Reranked** badge on every row and the score bars normalized per
+In the shot: the **Reranked** badge on every row, the decisive winner (an
+actual washed-up-boxer redemption plot), and score bars normalized per
 result set. A bonus: cross-encoder scores are comparable across
 collections, even ones embedded with different models.
 
@@ -167,10 +227,10 @@ collections, even ones embedded with different models.
 
 ### Hybrid search — on every topology
 
-Combine semantic similarity with keyword matching. Useful when a query
-mixes meaning and specific terms — *"MongoDB 7.0 replica set issues"*
-benefits from semantic (catches "replica set" → "replication") plus
-keyword (anchors on "7.0").
+Combine semantic similarity with keyword matching for queries that mix
+meaning and specific terms — *"MongoDB 7.0 replica set issues"* benefits
+from semantic (catches "replica set" → "replication") plus keyword
+(anchors on "7.0").
 
 ```bash
 mongosemantic search "Godzilla attacks a city" -c movies --hybrid
@@ -179,73 +239,69 @@ mongosemantic search "Godzilla attacks a city" -c movies --hybrid
 Two paths, picked automatically:
 
 - **Atlas with Search indexes** — native `$rankFusion` over `$vectorSearch`
-  plus BM25 `$search`. `apply` auto-creates both indexes, and the search
-  path verifies they actually exist before using `$rankFusion`.
+  plus BM25 `$search`; the search path verifies both indexes actually
+  exist before relying on them.
 - **Everywhere else** — self-hosted 7.0+ (standalone or replica set), and
   Atlas clusters whose Search indexes are cap-blocked (e.g. the free-tier
-  3-index budget): client-side reciprocal-rank fusion. A classic MongoDB
-  `$text` index on the shadow's chunk text supplies the keyword leg, the
-  vector leg uses HNSW when available, and the two are fused with the same
-  1/(60+rank), 0.6/0.4 weighting as `$rankFusion`.
+  3-index budget): client-side reciprocal-rank fusion over a classic
+  MongoDB `$text` index on the shadow's chunk text plus the vector leg,
+  with the same 1/(60+rank), 0.6/0.4 weighting as `$rankFusion`.
 
-This shot is hybrid running against a plain **self-hosted replica set** —
-no Atlas anywhere:
+The shot below is hybrid running against a plain **self-hosted replica
+set** — no Atlas anywhere. Inline-mode collections fall back to pure
+semantic with a clear notice. Filter, rerank, and hybrid all compose, and
+all three are available in the CLI, the web UI, and the MCP tools.
 
 <img src="docs/screenshots/v1/19-search-hybrid-local.png" width="100%" alt="Hybrid search on a self-hosted replica set — semantic + $text keyword legs fused with client-side RRF; no Atlas required"/>
 
-Inline-mode collections fall back to pure semantic with a clear notice (no
-error). All three search upgrades — filter, rerank, hybrid — compose, and
-all are available in the CLI, the web UI, and the MCP tools.
+### Keep an eye on the whole system
 
-### The web dashboard
+The overview dashboard answers "is everything healthy?" in one screen:
+detected topology, total embeddings, job-queue depth and failures,
+per-collection indexing activity, and live worker heartbeats.
 
-Connection setup with topology detection, a collections browser with
-per-field suitability scoring, one-click configuration, bulk indexing with
-live progress, a read-only aggregation runner (10 s timeout, 100-doc
-limit), a job-queue dashboard with retry/reindex, and an embedding
-explorer (2D PCA + K-means with keyword labels).
+<img src="docs/screenshots/v1/09-dashboard.png" width="100%" alt="Overview dashboard — topology, embedding totals, job-queue health, per-collection indexing activity"/>
 
-<table>
-  <tr>
-    <td width="50%"><img src="docs/screenshots/v1/02-collections.png" width="100%" alt="Collections browser — configured collections show model and storage mode; the rest are one click from setup"/></td>
-    <td width="50%"><img src="docs/screenshots/v1/04-indexing.png" width="100%" alt="Indexing dashboard — completed/in-flight/pending/failed tiles, live worker dot, per-field progress, activity feed"/></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="docs/screenshots/v1/08-visualize.png" width="100%" alt="Explore embeddings — K-means clusters over a 2D PCA projection, TF-IDF keyword labels per cluster"/></td>
-    <td width="50%"><img src="docs/screenshots/v1/09-dashboard.png" width="100%" alt="Overview dashboard — topology, embedding totals, job-queue health, per-collection indexing activity"/></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="docs/screenshots/v1/07-query.png" width="100%" alt="Read-only aggregation runner — quick examples, table view, stats line, CSV/JSON export"/></td>
-    <td width="50%"><img src="docs/screenshots/v1/06-search-detail.png" width="100%" alt="Click any search result to slide in the full source document"/></td>
-  </tr>
-</table>
+### Explore the embedding space
 
-### Configure and migrate without downtime
+A 2D PCA projection of sampled embeddings with K-means clusters and
+TF-IDF keyword labels per cluster — the fastest way to sanity-check that
+your embeddings actually capture structure (movie genres, product
+categories) before you build on them. Click any point to inspect the
+document behind it.
 
-`apply` discovers fields and scores them; pick shadow or inline storage,
-chunking, and a model. Later, switch a shadow-mode collection to a
-different embedding model with near-zero downtime:
+<img src="docs/screenshots/v1/08-visualize.png" width="100%" alt="Explore embeddings — K-means clusters over a 2D PCA projection, TF-IDF keyword labels per cluster"/>
+
+### Run safe aggregations
+
+A read-only pipeline runner for poking at your data without leaving the
+dashboard: quick examples, table/JSON views, stats line, CSV/JSON export.
+Hard-capped at 10 s and 100 documents, with `$out`/`$merge`/`$function`
+blocked — safe to expose to teammates.
+
+<img src="docs/screenshots/v1/07-query.png" width="100%" alt="Read-only aggregation runner — quick examples, table view, stats line, CSV/JSON export"/>
+
+### Migrate models with near-zero downtime
+
+Embedding models improve; your search should too. `migrate` re-embeds a
+shadow-mode collection with a new model into a temp shadow, then swaps it
+into place with an atomic `renameCollection` — search serves the old model
+up to the swap instant, the new model immediately after. The previous
+shadow is archived (`articles_embeddings_archive_{timestamp}`) for
+rollback; drop it with `--drop-archive` once verified.
 
 ```bash
 mongosemantic migrate --collection articles --model local-better
 ```
 
-New embeddings build into a temp shadow collection, then an atomic
-`renameCollection` swaps it into place — search serves the old model up to
-the swap instant, the new model immediately after. The previous shadow is
-kept as `articles_embeddings_archive_{timestamp}` for rollback; drop it
-with `--drop-archive` once verified. Also available as the `migrate_model`
-MCP tool. Shadow-mode only; inline-mode collections are rejected with a
-clear error.
+<img src="docs/screenshots/v1/16-migrate-modal.png" width="100%" alt="Migrate model — per-collection embedding-model swap with near-zero downtime; the old shadow is archived for rollback"/>
 
-<table>
-  <tr>
-    <td width="50%"><img src="docs/screenshots/v1/15-apply.png" width="100%" alt="Configure semantic search — discovered fields as checkboxes with suitability badges, shadow/inline mode, chunking, model picker"/></td>
-    <td width="50%"><img src="docs/screenshots/v1/16-migrate-modal.png" width="100%" alt="Migrate model — per-collection embedding-model swap with near-zero downtime; the old shadow is archived for rollback"/></td>
-  </tr>
-</table>
+### Let AI agents query your MongoDB over MCP
 
-### MCP — let Claude Desktop / Cursor query your MongoDB
+`mongosemantic integrate claude` writes the Claude Desktop config in one
+command; `serve` runs the same server over stdio or SSE for Cursor and any
+other MCP client. Agents get meaning-based search over your data — with
+filter, rerank, and hybrid — plus safe read-only introspection tools.
 
 <img src="docs/screenshots/v1/10-mcp.png" width="100%" alt="MCP page — one command wires mongosemantic into Claude Desktop; eleven tools exposed to any MCP client"/>
 
