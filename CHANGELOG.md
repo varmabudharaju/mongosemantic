@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.8.1 — 2026-06-09
+
+Bug-fix release. Everything here was found by putting the full feature
+surface under real-browser/real-terminal screenshot tests (`.capture.yaml`),
+which now ships in the repo along with README screenshots.
+
+- **CLI commands now honor the saved connection.** `status`, `search`,
+  `inspect`, `apply`, `index`, `migrate`, `retry`, `reindex`, `teardown`,
+  `integrate`, and the MCP server constructed `Settings()` directly, which
+  reads env vars only — contradicting the documented
+  flag > env > saved-config precedence. They all go through
+  `Settings.from_environment()` now, so a connection saved via the UI (or
+  `--uri/--db`) just works from the CLI.
+- **Stranded `in_flight` jobs are reclaimed.** A worker that died between
+  claiming and completing a job left it `in_flight` forever — nothing ever
+  touched it again. New `requeue_stale()` returns jobs stuck >10 min to
+  `pending`; the worker runs it (plus `prune_dead()`, which existed but was
+  never called) at startup and every 60 s, and `worker --once` runs both
+  before draining.
+- **MCP page tools table never rendered.** A duplicate `mcp` key in the SPA
+  handlers object meant an empty stub silently overwrote the real page
+  handler. Removed the stub.
+- **`mongosemantic ui` no longer swallows its own logs.** uvicorn's default
+  log config only attaches handlers to `uvicorn.*` loggers, so every
+  `mongosemantic.*` line — including HNSW warmup crashes and embedded-worker
+  errors — vanished. The `ui` command now attaches a stderr handler for the
+  `mongosemantic` logger family, and the warmup thread logs
+  `HNSW warmup finished` as an operational "fully responsive" signal.
+- Tests: unit tests now isolate `XDG_CONFIG_HOME` per test so a developer's
+  real saved connection can't leak in; two new `requeue_stale` tests.
+
 ## 0.8.0 — 2026-05-27
 
 Headline: **fast search on plain Mongo, zero-friction worker, much
