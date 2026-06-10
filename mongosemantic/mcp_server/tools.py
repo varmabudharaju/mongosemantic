@@ -21,6 +21,12 @@ from mongosemantic.search.cross_collection import (
     min_max_normalize,
     per_collection_targets,
 )
+from mongosemantic.search.filtering import FilterError, validate_filter
+from mongosemantic.search.rerank import (
+    RERANK_CANDIDATE_MULTIPLIER,
+    get_reranker,
+    rerank_reason,
+)
 from mongosemantic.state import (
     count_by_status,
     list_configured,
@@ -158,7 +164,8 @@ def t_get_status(db: Database, topology: Topology) -> dict:
 def _serialize_row(row: dict) -> dict:
     out = {
         k: row[k]
-        for k in ("source_id", "source_collection", "field_path", "chunk_index", "chunk_text", "score")
+        for k in ("source_id", "source_collection", "field_path", "chunk_index",
+                  "chunk_text", "score", "vector_score", "reranked")
         if k in row
     }
     if "source_id" in out:
@@ -169,46 +176,97 @@ def _serialize_row(row: dict) -> dict:
     return out
 
 
+def _validated_filter(flt: dict | None) -> dict | None:
+    """Validate an MCP-supplied filter dict, surfacing failures as ValueError."""
+    if flt is None:
+        return None
+    try:
+        return validate_filter(flt)
+    except FilterError as e:
+        raise ValueError(f"invalid filter: {e}") from e
+
+
+def _apply_rerank(query: str, rows: list[dict], limit: int) -> tuple[list[dict], str | None]:
+    """Second retrieval stage: cross-encode (query, chunk) pairs and keep the
+    top `limit`. If the rerank model can't load, degrade to the vector ranking
+    (truncated) and explain why in the returned notice."""
+    reranker = get_reranker()
+    if reranker is None:
+        return rows[:limit], f"rerank unavailable: {rerank_reason()}"
+    return reranker.rerank(query, rows, limit), None
+
+
 def t_semantic_search(
-    db: Database, topology: Topology, query: str, collection: str, limit: int = 10
+    db: Database,
+    topology: Topology,
+    query: str,
+    collection: str,
+    limit: int = 10,
+    filter: dict | None = None,
+    rerank: bool = False,
 ) -> dict:
+    source_filter = _validated_filter(filter)
     cfg = load_config(db, collection)
     if not cfg:
         raise ValueError(f"{collection!r} is not configured for semantic search")
     provider = get_provider(cfg.embedding_model)
     qvec = provider.embed(query).tolist()
-    rows = _run_one(db, cfg, collection, qvec, limit, topology)
-    return {
+    # Rerank is two-stage retrieval: over-fetch candidates, cross-encode, cut.
+    fetch_limit = limit * RERANK_CANDIDATE_MULTIPLIER if rerank else limit
+    rows = _run_one(db, cfg, collection, qvec, fetch_limit, topology,
+                    source_filter=source_filter)
+    notice = None
+    if rerank:
+        rows, notice = _apply_rerank(query, rows, limit)
+    result = {
         "query": query,
         "collection": collection,
         "rows": [_serialize_row(r) for r in rows],
     }
+    if notice:
+        result["notice"] = notice
+    return result
 
 
 # -----------------------------------------------------------------------------
 # Tool: hybrid_search (Atlas + shadow only)
 # -----------------------------------------------------------------------------
 def t_hybrid_search(
-    db: Database, topology: Topology, query: str, collection: str, limit: int = 10
+    db: Database,
+    topology: Topology,
+    query: str,
+    collection: str,
+    limit: int = 10,
+    filter: dict | None = None,
+    rerank: bool = False,
 ) -> dict:
+    source_filter = _validated_filter(filter)
     cfg = load_config(db, collection)
     if not cfg:
         raise ValueError(f"{collection!r} is not configured for semantic search")
     provider = get_provider(cfg.embedding_model)
     qvec = provider.embed(query).tolist()
+    fetch_limit = limit * RERANK_CANDIDATE_MULTIPLIER if rerank else limit
+    notices: list[str] = []
     if hybrid_available(cfg, topology):
-        rows = run_one_hybrid(db, cfg, collection, query, qvec, limit, topology)
-        notice = None
+        mode = "hybrid"
+        rows = run_one_hybrid(db, cfg, collection, query, qvec, fetch_limit,
+                              topology, source_filter=source_filter, hnsw=None)
     else:
-        rows = _run_one(db, cfg, collection, qvec, limit, topology)
-        notice = (
-            "hybrid requires Atlas + shadow mode; returned pure semantic results"
-        )
+        # Inline-mode collections have no chunk_text column to keyword-search.
+        mode = "semantic_fallback"
+        rows = _run_one(db, cfg, collection, qvec, fetch_limit, topology,
+                        source_filter=source_filter)
+        notices.append("hybrid requires shadow mode; returned pure semantic results")
+    if rerank:
+        rows, rerank_notice = _apply_rerank(query, rows, limit)
+        if rerank_notice:
+            notices.append(rerank_notice)
     return {
         "query": query,
         "collection": collection,
-        "mode": "hybrid" if notice is None else "semantic_fallback",
-        "notice": notice,
+        "mode": mode,
+        "notice": "; ".join(notices) or None,
         "rows": [_serialize_row(r) for r in rows],
     }
 
@@ -217,11 +275,13 @@ def t_hybrid_search(
 # Tool: search_all_collections
 # -----------------------------------------------------------------------------
 def t_search_all_collections(
-    db: Database, topology: Topology, query: str, limit: int = 10
+    db: Database, topology: Topology, query: str, limit: int = 10,
+    rerank: bool = False,
 ) -> dict:
     targets = per_collection_targets(db)
     if not targets:
         return {"query": query, "rows": [], "message": "no collections configured"}
+    fetch_limit = limit * RERANK_CANDIDATE_MULTIPLIER if rerank else limit
     all_rows: list[dict] = []
     models: dict[str, str] = {}
     # Embed once per distinct model, reuse across collections that share a model.
@@ -236,14 +296,24 @@ def t_search_all_collections(
                 get_provider(cfg.embedding_model).embed(query).tolist()
             )
         qvec = qvec_cache[cfg.embedding_model]
-        all_rows.extend(_run_one(db, cfg, name, qvec, limit, topology))
+        all_rows.extend(_run_one(db, cfg, name, qvec, fetch_limit, topology))
     if len(set(models.values())) > 1:
         all_rows = min_max_normalize(all_rows, "score")
     all_rows.sort(key=lambda r: r.get("score", 0), reverse=True)
-    return {
+    notice = None
+    if rerank:
+        # One rerank over the merged rows: cross-encoder scores are comparable
+        # across embedding models, so this also fixes mixed-model ordering.
+        rows, notice = _apply_rerank(query, all_rows, limit)
+    else:
+        rows = all_rows[:limit]
+    result = {
         "query": query,
-        "rows": [_serialize_row(r) for r in all_rows[:limit]],
+        "rows": [_serialize_row(r) for r in rows],
     }
+    if notice:
+        result["notice"] = notice
+    return result
 
 
 # -----------------------------------------------------------------------------

@@ -149,6 +149,68 @@ def test_semantic_search_rejects_unconfigured_collection():
         t.t_semantic_search(db, Topology.STANDALONE, "q", "missing")
 
 
+def test_semantic_search_filter_and_rerank_plumb_through():
+    db = _db()
+    _shadow_cfg(db)
+    fake_provider = MagicMock()
+    fake_provider.embed = lambda q: np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    fetched = [
+        {"source_id": "a", "source_collection": "articles", "field_path": "body",
+         "chunk_index": 0, "chunk_text": "first", "score": 0.9},
+        {"source_id": "b", "source_collection": "articles", "field_path": "body",
+         "chunk_index": 0, "chunk_text": "second", "score": 0.8},
+    ]
+    # Cross-encoder disagrees with the vector ordering — its order must win.
+    reranked = [
+        dict(fetched[1], vector_score=0.8, score=0.95, reranked=True),
+        dict(fetched[0], vector_score=0.9, score=0.40, reranked=True),
+    ]
+    fake_reranker = MagicMock()
+    fake_reranker.rerank.return_value = reranked
+    flt = {"year": {"$gte": 1960}}
+    with patch("mongosemantic.mcp_server.tools.get_provider", return_value=fake_provider), \
+         patch("mongosemantic.mcp_server.tools._run_one", return_value=fetched) as run, \
+         patch("mongosemantic.mcp_server.tools.get_reranker", return_value=fake_reranker):
+        out = t.t_semantic_search(db, Topology.STANDALONE, "q", "articles",
+                                  limit=2, filter=flt, rerank=True)
+    args, kwargs = run.call_args
+    assert kwargs["source_filter"] == flt
+    assert args[4] == 2 * 5  # limit * RERANK_CANDIDATE_MULTIPLIER
+    fake_reranker.rerank.assert_called_once_with("q", fetched, 2)
+    assert [r["source_id"] for r in out["rows"]] == ["b", "a"]
+    assert out["rows"][0]["vector_score"] == 0.8
+    assert out["rows"][0]["reranked"] is True
+
+
+def test_semantic_search_rejects_invalid_filter():
+    db = _db()
+    _shadow_cfg(db)
+    with pytest.raises(ValueError, match="invalid filter"):
+        t.t_semantic_search(db, Topology.STANDALONE, "q", "articles",
+                            filter={"$where": "1"})
+
+
+def test_semantic_search_rerank_unavailable_adds_notice_and_truncates():
+    db = _db()
+    _shadow_cfg(db)
+    fake_provider = MagicMock()
+    fake_provider.embed = lambda q: np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    fetched = [
+        {"source_id": str(i), "source_collection": "articles", "field_path": "body",
+         "chunk_text": f"t{i}", "score": 1.0 - i / 10}
+        for i in range(5)
+    ]
+    with patch("mongosemantic.mcp_server.tools.get_provider", return_value=fake_provider), \
+         patch("mongosemantic.mcp_server.tools._run_one", return_value=fetched), \
+         patch("mongosemantic.mcp_server.tools.get_reranker", return_value=None), \
+         patch("mongosemantic.mcp_server.tools.rerank_reason", return_value="no model"):
+        out = t.t_semantic_search(db, Topology.STANDALONE, "q", "articles",
+                                  limit=2, rerank=True)
+    assert out["notice"] == "rerank unavailable: no model"
+    assert len(out["rows"]) == 2
+    assert [r["source_id"] for r in out["rows"]] == ["0", "1"]
+
+
 # -- search_all_collections --------------------------------------------------
 
 def test_search_all_collections_merges_across_configs():
@@ -171,6 +233,42 @@ def test_search_all_collections_merges_across_configs():
     scores = [r["score"] for r in out["rows"]]
     assert scores == sorted(scores, reverse=True)
     assert {r["source_collection"] for r in out["rows"]} == {"articles", "products"}
+
+
+def test_search_all_collections_reranks_after_merge():
+    db = _db()
+    _shadow_cfg(db)
+    _inline_cfg(db)
+    fake_provider = MagicMock()
+    fake_provider.embed = lambda q: np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    per = {
+        "articles": [{"source_id": "a1", "source_collection": "articles",
+                      "field_path": "body", "chunk_text": "t", "score": 0.9}],
+        "products": [{"source_id": "p1", "source_collection": "products",
+                      "field_path": "description", "chunk_text": "u", "score": 0.7}],
+    }
+
+    def fake_run(_db, _cfg, name, _q, lim, _t):
+        assert lim == 2 * 5  # per-collection over-fetch: limit * multiplier
+        return list(per[name])
+
+    def fake_rerank(query, rows, lim):
+        out = [dict(r, vector_score=r["score"], score=1.0 - i * 0.1, reranked=True)
+               for i, r in enumerate(reversed(rows))]
+        return out[:lim]
+
+    fake_reranker = MagicMock()
+    fake_reranker.rerank = MagicMock(side_effect=fake_rerank)
+    with patch("mongosemantic.mcp_server.tools.get_provider", return_value=fake_provider), \
+         patch("mongosemantic.mcp_server.tools._run_one", side_effect=fake_run), \
+         patch("mongosemantic.mcp_server.tools.get_reranker", return_value=fake_reranker):
+        out = t.t_search_all_collections(db, Topology.STANDALONE, "q", limit=2, rerank=True)
+    # one rerank call, over the merged cross-collection rows
+    fake_reranker.rerank.assert_called_once()
+    _q, passed_rows, passed_limit = fake_reranker.rerank.call_args[0]
+    assert {r["source_collection"] for r in passed_rows} == {"articles", "products"}
+    assert passed_limit == 2
+    assert all(r["reranked"] is True for r in out["rows"])
 
 
 # -- hybrid_search ---------------------------------------------------------
@@ -218,6 +316,42 @@ def test_hybrid_search_falls_back_for_inline_mode():
          patch("mongosemantic.mcp_server.tools._run_one", return_value=[]):
         out = t.t_hybrid_search(db, Topology.ATLAS, "q", "products")
     assert out["mode"] == "semantic_fallback"
+    assert out["notice"] == "hybrid requires shadow mode; returned pure semantic results"
+
+
+def test_hybrid_search_passes_filter_and_overfetches_for_rerank():
+    db = _db()
+    _shadow_cfg(db)
+    fake_provider = MagicMock()
+    fake_provider.embed = lambda q: np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    fetched = [{"source_id": "a", "source_collection": "articles",
+                "field_path": "body", "chunk_text": "t", "score": 0.9}]
+    fake_reranker = MagicMock()
+    fake_reranker.rerank.return_value = [
+        dict(fetched[0], vector_score=0.9, score=0.8, reranked=True)
+    ]
+    flt = {"year": 1999}
+    with patch("mongosemantic.mcp_server.tools.get_provider", return_value=fake_provider), \
+         patch("mongosemantic.mcp_server.tools.run_one_hybrid", return_value=fetched) as hyb, \
+         patch("mongosemantic.mcp_server.tools.get_reranker", return_value=fake_reranker):
+        out = t.t_hybrid_search(db, Topology.STANDALONE, "q", "articles",
+                                limit=3, filter=flt, rerank=True)
+    args, kwargs = hyb.call_args
+    assert kwargs["source_filter"] == flt
+    assert kwargs["hnsw"] is None
+    assert args[5] == 3 * 5  # limit * RERANK_CANDIDATE_MULTIPLIER
+    assert out["mode"] == "hybrid"
+    assert out["notice"] is None
+    assert out["rows"][0]["reranked"] is True
+    assert out["rows"][0]["vector_score"] == 0.9
+
+
+def test_hybrid_search_rejects_invalid_filter():
+    db = _db()
+    _shadow_cfg(db)
+    with pytest.raises(ValueError, match="invalid filter"):
+        t.t_hybrid_search(db, Topology.STANDALONE, "q", "articles",
+                          filter={"a": {"$expr": {"$gt": [1, 0]}}})
 
 
 # -- safe_aggregation --------------------------------------------------------
