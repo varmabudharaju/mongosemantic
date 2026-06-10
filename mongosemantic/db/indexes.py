@@ -52,6 +52,7 @@ def create_atlas_vector_index(
     field_path: str,
     dim: int,
     path: str = "embedding",
+    name: str | None = None,
 ) -> str:
     """Create an Atlas Search vector index on `target`. Returns the index name.
 
@@ -59,9 +60,13 @@ def create_atlas_vector_index(
     Defaults to `"embedding"` (shadow-mode layout). For inline mode the caller
     passes the inline path (e.g. `_msem.body.embedding`).
 
+    `name` overrides the deterministic index name — migrations build the new
+    index on a temp shadow under a `_mig_<ts>` name and record that name in
+    the config, so the index actually created MUST match what gets recorded.
+
     Safe to call repeatedly — an already-existing index is left in place.
     """
-    name = vector_index_name(collection, field_path)
+    name = name or vector_index_name(collection, field_path)
     existing = {idx.get("name") for idx in list(target.list_search_indexes())}
     if name in existing:
         return name

@@ -126,7 +126,7 @@ Eleven tools are exposed:
 | `get_schema_context` | Compact schema summary for AI-generated aggregations |
 | `migrate_model` | Switch a collection's embedding model with near-zero downtime |
 
-## Status (v0.8.1)
+## Status (v0.8.2)
 
 - [x] Connect to Atlas / replica set / standalone — saved connection shared by UI, CLI, and MCP server
 - [x] Inspect a collection, score fields for suitability
@@ -140,19 +140,22 @@ Eleven tools are exposed:
 - [x] **Embedded worker** — `mongosemantic ui` alone keeps embeddings in sync; no second terminal
 - [x] **Self-healing job queue** — stale in-flight jobs reclaimed, dead worker heartbeats pruned automatically
 - [x] **MCP server** for Claude Desktop / Cursor / any MCP client (stdio + SSE)
-- [x] **Atlas hybrid search** — semantic + keyword via `$rankFusion` (`--hybrid` / UI toggle / `hybrid_search` MCP tool)
+- [x] **Atlas hybrid search** — semantic + keyword via `$rankFusion` (`--hybrid` / UI toggle / `hybrid_search` MCP tool), live-verified on Atlas 8.0.24
 - [x] **Online model migration** — `mongosemantic migrate` + `migrate_model` MCP tool, atomic `renameCollection` swap
 - [x] **Visualize page** — K-means clusters over a 2D PCA projection, TF-IDF keyword labels, click-to-inspect
 - [x] **Search & query export** — CSV / JSONL / JSON from the search page, CSV / JSON from the aggregation runner
 
 ## Known limitations
 
-- **Atlas paths are logically reviewed but not live-tested.** Vector index
-  creation, `$vectorSearch`, `$search`, `$rankFusion`, and the migration
-  index-name carry-over all work end-to-end against the self-hosted
-  replica set used by the integration tests. See
-  [`docs/atlas-setup.md`](docs/atlas-setup.md) for a free-tier (M0)
-  runbook that exercises every Atlas-specific path in ~10 minutes.
+- **Free-tier Atlas (M0/M2/M5) caps search indexes at 3 per cluster.**
+  Each shadow-mode field costs 2 (vectorSearch + BM25), each inline field 1.
+  `apply` and `migrate` detect the cap and degrade gracefully (hybrid falls
+  back to pure semantic). The Atlas paths — `$vectorSearch`, hybrid
+  `$rankFusion`, migration index carry-over — are live-verified against a
+  free-tier M0 on MongoDB 8.0.24; see
+  [`docs/atlas-setup.md`](docs/atlas-setup.md) for the runbook. Inline-mode
+  with a real Atlas vector index is the one path verified only through its
+  brute-force fallback (the M0 cap leaves it no index slot).
 
 ## Embedding models
 

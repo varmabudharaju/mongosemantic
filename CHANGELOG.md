@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.8.2 — 2026-06-09
+
+Atlas live-verification release. Every Atlas-only path was exercised
+against a real free-tier M0 cluster (MongoDB 8.0.24); the bugs that
+testing surfaced are fixed here.
+
+- **Migration recorded a vector-index name it never created.**
+  `create_atlas_vector_index()` ignored the `_mig_<ts>` temp name that
+  migration writes to the config, creating the index under its canonical
+  name instead — so post-migration `$vectorSearch` referenced a
+  nonexistent index. The created index now carries the recorded name
+  (verified live: recorded name == live index name, READY/queryable).
+- **A failed migration stranded its temp shadow.** An exception between
+  temp-shadow creation and the rename (typically the free-tier index cap)
+  left `<shadow>_mig_<ts>` plus its search indexes behind — silently
+  eating the M0 cluster's 3-index budget. The build phase now drops the
+  temp shadow on any failure, and BM25 index creation failure degrades
+  to pure-semantic (with a warning) instead of failing the migration.
+- **Raw Mongo URIs are never printed.** Seed scripts echoed the full
+  URI — password included — in error and success messages. `redact_uri()`
+  / `scrub_uri()` moved to `db.client` and are used everywhere a URI or
+  driver exception is printed.
+- **Seed scripts use the CLI's TLS config.** They built a bare
+  `MongoClient`, which fails `CERTIFICATE_VERIFY_FAILED` against Atlas on
+  macOS Pythons without a system CA bundle. They now connect through
+  `MongoConnection.open` (certifi-backed).
+- `search --hybrid` prints a hint when hybrid returns zero rows on a
+  hybrid-capable collection (indexes still building, or blocked by the
+  free-tier cap) instead of showing a bare empty table.
+- Docs: `docs/atlas-setup.md` rewritten around the free-tier 3-index
+  budget (the full three-collection runbook needs 7 slots → M10+), the
+  `$rankFusion` version claim corrected (Atlas ships it on 8.0.x —
+  verified on 8.0.24; self-managed needs 8.1+), and hybrid's
+  reciprocal-rank-fusion score scale (~0.01) documented.
+
 ## 0.8.1 — 2026-06-09
 
 Bug-fix release. Everything here was found by putting the full feature

@@ -153,6 +153,14 @@ def search_cmd(
                     "Falling back to pure semantic.[/yellow]"
                 )
             rows = _run(cfg, collection)
+            if hybrid and not rows and hybrid_available(cfg, conn.topology):
+                console.print(
+                    "[yellow]Hybrid returned no rows. Both Atlas indexes (vectorSearch "
+                    "+ search) must exist and be queryable — they build for ~30–90 s "
+                    "after `apply`, and on free tier the 3-index cluster cap can block "
+                    "their creation (apply reports this). Check the cluster's Search "
+                    "tab, or retry without --hybrid.[/yellow]"
+                )
         else:
             all_rows: list[dict] = []
             targets = per_collection_targets(db)

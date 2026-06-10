@@ -192,35 +192,57 @@ def migrate_collection(
     temp_shadow = _temp_shadow_name(cfg.shadow_collection, ts)
     archive = _archive_name(cfg.shadow_collection, ts)
 
-    # --- 1. Build temp shadow + indexes ----------------------------------
-    ensure_shadow_indexes(db[temp_shadow])
+    # Build phase. Anything that fails before the rename must drop the temp
+    # shadow on the way out — a stranded temp keeps its search indexes, and
+    # on free-tier Atlas (3-index cluster cap) that silently eats the slots
+    # every future apply/migrate needs.
+    try:
+        # --- 1. Build temp shadow + indexes ------------------------------
+        ensure_shadow_indexes(db[temp_shadow])
 
-    new_vector_index_names: dict[str, str] = {}
-    new_search_index_names: dict[str, str] = {}
-    if conn.topology == Topology.ATLAS:
-        for spec in cfg.fields:
-            vname = _temp_index_name(canonical_vector_index_name(collection, spec.path), ts)
-            sname = _temp_index_name(canonical_search_index_name(collection, spec.path), ts)
-            create_atlas_vector_index(
-                db[temp_shadow], collection, spec.path, new_dim, path="embedding"
-            )
-            create_atlas_search_index(db[temp_shadow], sname)
-            new_vector_index_names[spec.path] = vname
-            new_search_index_names[spec.path] = sname
-    # Self-hosted: brute-force aggregation, no index names to track.
+        new_vector_index_names: dict[str, str] = {}
+        new_search_index_names: dict[str, str] = {}
+        if conn.topology == Topology.ATLAS:
+            for spec in cfg.fields:
+                vname = _temp_index_name(canonical_vector_index_name(collection, spec.path), ts)
+                sname = _temp_index_name(canonical_search_index_name(collection, spec.path), ts)
+                # The created index MUST carry the name we record in the
+                # config — search resolves indexes by the recorded name
+                # after the rename promotes the temp into live position.
+                create_atlas_vector_index(
+                    db[temp_shadow], collection, spec.path, new_dim,
+                    path="embedding", name=vname,
+                )
+                new_vector_index_names[spec.path] = vname
+                # The BM25 sibling only powers hybrid search. If it can't be
+                # created (e.g. free-tier index cap), degrade to pure
+                # semantic rather than failing the whole migration.
+                try:
+                    create_atlas_search_index(db[temp_shadow], sname)
+                    new_search_index_names[spec.path] = sname
+                except Exception as e:  # noqa: BLE001 — Atlas errors vary
+                    log.warning(
+                        "search (BM25) index creation failed for %r — hybrid "
+                        "search will fall back to pure semantic on this "
+                        "collection: %s", spec.path, e,
+                    )
+        # Self-hosted: brute-force aggregation, no index names to track.
 
-    # --- 2. Bulk embed every source doc into the temp shadow -------------
-    provider = get_provider(new_model)
-    total = db[collection].estimated_document_count()
-    processed = 0
-    chunks_written = 0
-    for doc in db[collection].find({}):
-        chunks_written += _embed_one_doc(db, cfg, new_model, temp_shadow, doc, provider)
-        processed += 1
-        if progress is not None and processed % 50 == 0:
+        # --- 2. Bulk embed every source doc into the temp shadow ---------
+        provider = get_provider(new_model)
+        total = db[collection].estimated_document_count()
+        processed = 0
+        chunks_written = 0
+        for doc in db[collection].find({}):
+            chunks_written += _embed_one_doc(db, cfg, new_model, temp_shadow, doc, provider)
+            processed += 1
+            if progress is not None and processed % 50 == 0:
+                progress(processed, total)
+        if progress is not None:
             progress(processed, total)
-    if progress is not None:
-        progress(processed, total)
+    except Exception:
+        db.drop_collection(temp_shadow)
+        raise
 
     # --- 3. Update cfg BEFORE rename. After rename lands, search will use
     #        the new model, new dim, and the temp index names — which the

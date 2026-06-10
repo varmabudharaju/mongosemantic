@@ -8,8 +8,13 @@ cluster so you can validate the paths that don't run against self-hosted:
 - `$rankFusion` hybrid search
 - Migration with Atlas Search index rename carry-over
 
-All four paths are logically reviewed and unit-tested but have not been
-live-tested against a real Atlas cluster as of v0.6.0.
+As of v0.8.2 all four paths have been live-verified against a free-tier
+M0 cluster (MongoDB 8.0.24): shadow-mode `$vectorSearch`, hybrid
+`$rankFusion` (real RRF scores, ~0.01 scale), and migration index
+carry-over including the graceful BM25 degradation at the M0 index cap.
+The one path that can't be exercised on M0 is inline-mode with a real
+vector index — the index cap leaves no slot — so inline on Atlas has
+only been verified through its brute-force fallback.
 
 ---
 
@@ -63,6 +68,29 @@ python3 scripts/seed_demo.py
 
 ## 6. Apply + index
 
+> **⚠️ Free-tier index budget.** M0/M2/M5 clusters allow **3 search
+> indexes total per cluster** — counting every database, including
+> leftovers from earlier runs. Each shadow-mode field costs **2** slots
+> (vectorSearch + BM25 search); each inline-mode field costs **1**.
+> The three applies below need **7** slots, so they only fit on M10+.
+> On a free tier, pick the single-collection variant:
+>
+> ```bash
+> # M0-sized: one shadow field = 2 slots, leaves 1 slot free
+> # (you'll want it for the migration test in step 7).
+> mongosemantic apply  -c articles -f body
+> mongosemantic index  -c articles
+> mongosemantic worker --once
+> ```
+>
+> If `apply` hits the cap it says so explicitly, keeps whatever indexes
+> it already created, and prints the manual `createSearchIndex` commands
+> for the rest. Check the **Search** tab in the Atlas UI for stray
+> indexes from old experiments — an abandoned migration temp
+> (`*_mig_<timestamp>`) holds a slot until you drop it.
+
+On an M10+ cluster, the full three-collection demo:
+
 ```bash
 mongosemantic apply  -c articles -f title -f body
 mongosemantic apply  -c products -f description --mode inline
@@ -84,6 +112,8 @@ shadow collection:
 Both indexes take **30–90 seconds** to come online. The CLI returns
 immediately; the indexes finish building in the background. You can
 watch progress in Atlas → **Database** → cluster → **Search** tab.
+Until the vector index is queryable, search transparently falls back
+to the brute-force aggregation — results still come back, just slower.
 
 ## 7. Verify each Atlas-only path
 
@@ -108,15 +138,18 @@ mongosemantic search "MongoDB 7.0 replica set issues" -c articles --hybrid --lim
 
 The hybrid result should include both semantic neighbors (programming
 articles about MongoDB) and keyword anchors (anything literally
-mentioning "7.0"). If hybrid silently fell back to pure semantic,
-check the cluster version — `$rankFusion` requires **MongoDB 8.1+**.
-Atlas typically runs the latest stable, but verify in
-**Database** → cluster → **Overview** → MongoDB version.
+mentioning "7.0"). Two things to know about hybrid results:
 
-If you're on 8.0, the hybrid path will run but return only the
-`$vectorSearch` half. You'll see a warning in the CLI:
+- **Scores are reciprocal-rank-fusion scores, not cosine.** Expect the
+  ~0.01–0.02 range (1 / (rank + 60) summed across the two rankings),
+  not the 0.5–0.8 cosine range plain semantic search returns.
+- Atlas-managed clusters ship `$rankFusion` on 8.0.x as well — verified
+  live on 8.0.24. (Self-managed MongoDB needs 8.1+.)
 
-    Hybrid search requires Atlas + shadow-mode collections. …
+If hybrid returns an empty table, the BM25 (`mongosemantic_search_…`)
+or vector index is missing or still building — the CLI prints a hint
+pointing at the cluster's Search tab. `apply` creates both; the
+free-tier index cap is the usual reason one is missing.
 
 ### Migration with index name carry-over
 
@@ -167,12 +200,13 @@ Or keep the cluster around. M0 is free.
 
 ## Known caveats
 
-- **`$rankFusion` requires MongoDB 8.1+.** Older Atlas tiers on 8.0 or
-  earlier fall back to pure semantic. The fallback is silent in the
-  pipeline but the CLI prints an explicit notice.
-- **Index build time.** The first `apply` against Atlas blocks user
-  queries on that collection until both indexes finish building
-  (~30–90 s). Subsequent applies on other collections build in
-  parallel.
+- **M0/M2/M5 search-index cap: 3 per cluster, all databases counted.**
+  Each shadow field needs 2 slots, each inline field 1. `apply` detects
+  the cap error, explains it, and prints manual commands for the
+  fields it couldn't index. Abandoned `*_mig_*` temp collections from
+  interrupted migrations hold a slot each — drop them.
+- **Index build time.** Indexes build in the background for ~30–90 s
+  after `apply`; until the vector index is queryable, search falls
+  back to brute-force aggregation (slower, same results).
 - **M0 storage cap.** 512 MB. The 100-doc demo corpus uses about 8 MB
   including embeddings; a real workload at scale needs M10+.
