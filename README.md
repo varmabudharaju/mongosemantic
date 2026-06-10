@@ -4,6 +4,10 @@
 
 `mongosemantic` connects to your existing MongoDB, picks a text field, and makes it searchable by meaning. No separate vector database. No ETL. Works on Atlas, self-hosted replica sets, and standalone MongoDB 7.0+.
 
+<img src="docs/screenshots/v1/05-search.png" width="100%" alt="Semantic search in the web UI — a natural-language query over 23k movie plots returns Cold-War spy films with scores, score bars, and CSV/JSONL/JSON export"/>
+
+*A meaning-only query — none of these results contain the words "spies" or "blackmail" as keywords. 17 ms over 45k embedded chunks via the embedded HNSW index, on a plain self-hosted replica set.*
+
 ## Quick start
 
 ```bash
@@ -21,6 +25,8 @@ mongosemantic ui                                   # browser dashboard on :8080
 mongosemantic integrate claude                     # wire into Claude Desktop
 mongosemantic serve                                # MCP server for AI agents
 ```
+
+<img src="docs/screenshots/v1/12-cli-search.png" width="100%" alt="CLI semantic search over 23k movie plots — finds Cold-War spy thrillers from a meaning-only query"/>
 
 ## Web dashboard
 
@@ -40,6 +46,22 @@ The dashboard provides:
 - Live-search across one or all configured collections
 - Read-only aggregation runner (10s timeout, 100-doc limit)
 - Job queue dashboard with retry / reindex
+- Embedding explorer — 2D PCA scatter with K-means clusters and keyword labels
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/v1/02-collections.png" width="100%" alt="Collections browser — configured collections show model and storage mode; the rest are one click from setup"/></td>
+    <td width="50%"><img src="docs/screenshots/v1/04-indexing.png" width="100%" alt="Indexing dashboard — completed/in-flight/pending/failed tiles, live worker dot, per-field progress, activity feed"/></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/v1/08-visualize.png" width="100%" alt="Explore embeddings — K-means clusters over a 2D PCA projection, TF-IDF keyword labels per cluster"/></td>
+    <td width="50%"><img src="docs/screenshots/v1/09-dashboard.png" width="100%" alt="Overview dashboard — topology, embedding totals, job-queue health, per-collection indexing activity"/></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/v1/07-query.png" width="100%" alt="Read-only aggregation runner — quick examples, table view, stats line, CSV/JSON export"/></td>
+    <td width="50%"><img src="docs/screenshots/v1/06-search-detail.png" width="100%" alt="Click any search result to slide in the full source document"/></td>
+  </tr>
+</table>
 
 ## Online model migration
 
@@ -82,6 +104,8 @@ mongosemantic integrate claude          # writes Claude Desktop config (restart 
 mongosemantic serve --transport sse     # or run as a standalone SSE server on :8090
 ```
 
+<img src="docs/screenshots/v1/10-mcp.png" width="100%" alt="MCP page — one command wires mongosemantic into Claude Desktop; eleven tools exposed to any MCP client"/>
+
 Eleven tools are exposed:
 
 | Tool | What it does |
@@ -98,23 +122,24 @@ Eleven tools are exposed:
 | `get_schema_context` | Compact schema summary for AI-generated aggregations |
 | `migrate_model` | Switch a collection's embedding model with near-zero downtime |
 
-## Status (v0.6.0)
+## Status (v0.8.1)
 
-- [x] Connect to Atlas / replica set / standalone
+- [x] Connect to Atlas / replica set / standalone — saved connection shared by UI, CLI, and MCP server
 - [x] Inspect a collection, score fields for suitability
 - [x] Configure shadow-mode **or inline-mode** semantic search on one or more fields
 - [x] Real chunking — long documents split into overlapping chunks, search ranks per chunk
 - [x] Bulk-embed existing documents
 - [x] Sync in real time (change streams) or on a schedule (polling)
 - [x] Search via native Atlas `$vectorSearch`, embedded HNSW (non-Atlas), or brute-force aggregation
-- [x] CLI: inspect / apply / index / search / worker / status / retry / reindex / **reindex-hnsw** / **ui** / **serve** / **integrate**
-- [x] Web UI with seven pages and a safe aggregation runner
+- [x] CLI: inspect / apply / index / search / worker / status / retry / reindex / reindex-hnsw / migrate / teardown / ui / serve / integrate
+- [x] Web UI — connection, collections, inspect, configure, indexing, search, query, dashboard, visualize, MCP, guide
+- [x] **Embedded worker** — `mongosemantic ui` alone keeps embeddings in sync; no second terminal
+- [x] **Self-healing job queue** — stale in-flight jobs reclaimed, dead worker heartbeats pruned automatically
 - [x] **MCP server** for Claude Desktop / Cursor / any MCP client (stdio + SSE)
 - [x] **Atlas hybrid search** — semantic + keyword via `$rankFusion` (`--hybrid` / UI toggle / `hybrid_search` MCP tool)
 - [x] **Online model migration** — `mongosemantic migrate` + `migrate_model` MCP tool, atomic `renameCollection` swap
-- [x] **Worker DX** — `worker --once` flag, heartbeat tracking, failed-job introspection in `status` and dashboard
-- [x] **Visualize page** — 2D PCA scatter of sampled embeddings, click-to-detail
-- [x] **Migrate modal in UI** — per-collection model swap with live progress polling
+- [x] **Visualize page** — K-means clusters over a 2D PCA projection, TF-IDF keyword labels, click-to-inspect
+- [x] **Search & query export** — CSV / JSONL / JSON from the search page, CSV / JSON from the aggregation runner
 
 ## Known limitations
 
@@ -124,8 +149,6 @@ Eleven tools are exposed:
   replica set used by the integration tests. See
   [`docs/atlas-setup.md`](docs/atlas-setup.md) for a free-tier (M0)
   runbook that exercises every Atlas-specific path in ~10 minutes.
-- The visualize page projects sampled embeddings to 2D via PCA only. K-means
-  clustering with keyword labels (pgsemantic-style) is not in this release.
 
 ## Embedding models
 
@@ -167,6 +190,12 @@ pip install -e ".[dev,openai]"
 docker compose up -d                          # replica set + standalone
 MONGOSEMANTIC_RUN_INTEGRATION=1 python3 -m pytest -v
 ```
+
+The README screenshots are reproducible: `.capture.yaml` at the repo root
+defines every shot (real Chromium renders of the dashboard, real Terminal
+captures of the CLI). Regenerate them with
+[`capture`](https://github.com/varmabudharaju/capture)` run` against a
+seeded database.
 
 ### Demo data
 

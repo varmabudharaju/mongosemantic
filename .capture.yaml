@@ -1,0 +1,160 @@
+output:
+  dir: docs/screenshots
+  version: v1
+
+app:
+  command: "mongosemantic ui"
+  cwd: .
+  ready:
+    # Gate on the warmup log line, not just HTTP 200 — loading the HNSW
+    # indexes at boot briefly contends with request handling, and capturing
+    # during that window flakes.
+    log_line: "HNSW warmup finished"
+    timeout: 120
+
+shots:
+  # ---- Web dashboard, in the order a new user meets the pages ----
+
+  - name: connection
+    kind: web
+    url: http://127.0.0.1:8080/#/connection
+    viewport: { width: 1280, height: 800 }
+    full_page: true
+    alt: "Connection page — connected to a self-hosted replica set with topology detection, saved-connection card, and developer help"
+    steps:
+      - { wait_for: "#conn-status-title" }
+      - { wait_ms: 500 }
+
+  - name: collections
+    kind: web
+    url: http://127.0.0.1:8080/#/collections
+    viewport: { width: 1280, height: 800 }
+    full_page: true
+    alt: "Collections browser — movies and wines configured with model + storage mode, other collections one click from setup"
+    steps:
+      - { wait_for: "#collections-table td" }
+      - { wait_ms: 400 }
+
+  - name: inspect
+    kind: web
+    url: http://127.0.0.1:8080/#/inspect/movies
+    viewport: { width: 1280, height: 800 }
+    full_page: true
+    alt: "Inspect page — every field of the movies collection scored for semantic-search suitability, with sample documents below"
+    steps:
+      - { wait_for: "#inspect-table td" }
+      - { wait_ms: 500 }
+
+  - name: indexing
+    kind: web
+    url: http://127.0.0.1:8080/#/indexing/movies
+    viewport: { width: 1280, height: 800 }
+    full_page: true
+    alt: "Indexing dashboard — completed/in-flight/pending/failed tiles, live worker dot, per-field progress, recent activity feed"
+    steps:
+      - { wait_for: "#indexing-field-table td" }
+      - { wait_ms: 1800 }
+
+  - name: search
+    kind: web
+    url: http://127.0.0.1:8080/#/search/movies
+    viewport: { width: 1280, height: 800 }
+    full_page: true
+    alt: "Semantic search — natural-language query over 23k movie plots with scores, score bars, stats line, and CSV/JSONL/JSON export"
+    steps:
+      - { wait_for: "#search-q" }
+      - { fill: ["#search-q", "spies blackmail and intrigue in cold war Berlin"] }
+      - { fill: ["#search-limit", "5"] }
+      - { click: "#search-go" }
+      - { wait_for: "#search-results li" }
+      # A debounced rerun can race the click run; wait for both to settle.
+      - { wait_ms: 2500 }
+
+  - name: search-detail
+    kind: web
+    url: http://127.0.0.1:8080/#/search/movies
+    viewport: { width: 1280, height: 800 }
+    full_page: false
+    alt: "Click any search result to slide in the full source document"
+    steps:
+      - { wait_for: "#search-q" }
+      - { fill: ["#search-q", "lonely astronaut stranded far from home"] }
+      - { click: "#search-go" }
+      - { wait_for: "#search-results li" }
+      - { wait_ms: 1200 }
+      - { click: "#search-results li" }
+      - { wait_for: "#inspect-detail-body" }
+      - { wait_ms: 600 }
+
+  - name: query
+    kind: web
+    url: http://127.0.0.1:8080/#/query
+    viewport: { width: 1280, height: 800 }
+    full_page: true
+    alt: "Read-only aggregation runner — quick examples, table/JSON view toggle, stats line, CSV/JSON export; $out/$merge/$function blocked"
+    steps:
+      - { wait_for: "#query-pipeline" }
+      - { fill: ["#query-pipeline", "[\n  {\"$sort\": {\"price\": -1}},\n  {\"$limit\": 5},\n  {\"$project\": {\"_id\": 0, \"sku\": 1, \"name\": 1, \"price\": 1, \"in_stock\": 1}}\n]"] }
+      - { click: "#query-run" }
+      - { wait_for: "#query-table td" }
+      - { wait_ms: 400 }
+
+  - name: visualize
+    kind: web
+    url: http://127.0.0.1:8080/#/visualize
+    viewport: { width: 1280, height: 800 }
+    full_page: true
+    alt: "Explore embeddings — 2D PCA scatter of sampled embeddings with K-means clusters, TF-IDF keyword labels, click-to-highlight"
+    steps:
+      - { wait_for: "#viz-legend-list li" }
+      - { wait_ms: 2000 }
+
+  - name: dashboard
+    kind: web
+    url: http://127.0.0.1:8080/#/dashboard
+    viewport: { width: 1280, height: 800 }
+    full_page: true
+    alt: "Overview dashboard — topology, embedding totals, job-queue health, per-collection indexing activity, live workers"
+    steps:
+      - { wait_for: "#dashboard-perCollection td" }
+      - { wait_ms: 800 }
+
+  - name: mcp
+    kind: web
+    url: http://127.0.0.1:8080/#/mcp
+    viewport: { width: 1280, height: 800 }
+    full_page: true
+    alt: "MCP page — one command wires mongosemantic into Claude Desktop; eleven tools exposed to any MCP client"
+    steps:
+      - { wait_for: "#mcp-tools-table td" }
+      - { wait_ms: 400 }
+
+  # ---- CLI ----
+
+  - name: cli-help
+    kind: cli
+    command: "mongosemantic --help"
+    cols: 100
+    rows: 36
+    alt: "CLI — every command from inspect/apply/index to search, worker, ui, serve, and migrate"
+
+  - name: cli-search
+    kind: cli
+    command: "mongosemantic search \"spies blackmail and intrigue in cold war Berlin\" -c movies --limit 5"
+    cols: 100
+    rows: 20
+    alt: "CLI semantic search over 23k movie plots — finds Cold-War spy thrillers from a meaning-only query"
+
+  - name: cli-inspect
+    kind: cli
+    command: "mongosemantic inspect -c movies"
+    cols: 100
+    rows: 48
+    alt: "CLI inspect — field-by-field suitability scoring for the movies collection"
+
+  - name: cli-status
+    kind: cli
+    command: "mongosemantic status"
+    cols: 100
+    rows: 30
+    alt: "CLI status — topology, configured collections, job queue counts, worker heartbeats"
