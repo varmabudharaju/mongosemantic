@@ -30,7 +30,8 @@ from datetime import datetime
 from pathlib import Path
 
 from bson import json_util
-from pymongo import MongoClient
+
+from mongosemantic.db.client import MongoConnection, redact_uri, scrub_uri
 
 # Community mirror of MongoDB's `sample_mflix`. The same JSON Atlas seeds.
 SOURCE_URL = (
@@ -133,15 +134,18 @@ def main(argv: list[str] | None = None) -> int:
             return 3
         source = tmp
 
-    client = MongoClient(URI, serverSelectionTimeoutMS=5000)
-    db = client[DB_NAME]
+    # MongoConnection.open gets us the certifi-backed TLS config the CLI
+    # uses; a bare MongoClient fails cert verification on macOS Pythons
+    # without a system CA bundle.
     try:
-        client.admin.command("ping")
+        conn = MongoConnection.open(URI, DB_NAME)
     except Exception as e:
-        print(f"could not reach {URI}: {e}", file=sys.stderr)
+        print(f"could not reach {redact_uri(URI)}: {scrub_uri(str(e), URI)}", file=sys.stderr)
         return 2
+    client = conn.client
+    db = conn.db
 
-    print(f"writing to {DB_NAME}@{URI}")
+    print(f"writing to {DB_NAME}@{redact_uri(URI)}")
     _maybe_wipe(db, args.wipe)
 
     started = datetime.utcnow()

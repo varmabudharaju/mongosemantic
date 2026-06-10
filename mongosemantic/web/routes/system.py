@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from mongosemantic import connection_store
 from mongosemantic.config import Settings
-from mongosemantic.db.client import MongoConnection
+from mongosemantic.db.client import MongoConnection, redact_uri, scrub_uri
 from mongosemantic.state import list_configured
 from mongosemantic.web.connection_errors import (
     ConnectionError,
@@ -43,28 +43,10 @@ class UriRequest(BaseModel):
     uri: str
 
 
-def _redact(uri: str) -> str:
-    """Mask credentials. mongodb+srv://user:pass@host -> mongodb+srv://<redacted>@host."""
-    if "@" not in uri:
-        return uri
-    scheme, rest = uri.split("://", 1)
-    creds, host = rest.rsplit("@", 1)
-    if ":" in creds:
-        return f"{scheme}://<redacted>@{host}"
-    return uri  # no creds to redact
-
-
-def _scrub(details: str, uri: str) -> str:
-    """Replace a known URI inside arbitrary exception text with its redacted form.
-
-    Defends against PyMongo exception reprs that may echo back the URI we
-    passed in. Empirically the current PyMongo versions don't do this for the
-    error paths we map, but the cost of the scrub is trivial and the cost of
-    a credentials leak is high.
-    """
-    if not uri or uri not in details:
-        return details
-    return details.replace(uri, _redact(uri))
+# Canonical implementations live in the db layer so non-web callers (CLI,
+# seed scripts) share them; keep the old local names for this module.
+_redact = redact_uri
+_scrub = scrub_uri
 
 
 def _env_overrides() -> dict:

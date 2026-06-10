@@ -23,6 +23,29 @@ def detect_topology(
     return Topology.STANDALONE
 
 
+def redact_uri(uri: str) -> str:
+    """Mask credentials: mongodb+srv://user:pass@host -> mongodb+srv://<redacted>@host."""
+    if "@" not in uri:
+        return uri
+    scheme, rest = uri.split("://", 1)
+    creds, host = rest.rsplit("@", 1)
+    if ":" in creds:
+        return f"{scheme}://<redacted>@{host}"
+    return uri  # no creds to redact
+
+
+def scrub_uri(details: str, uri: str) -> str:
+    """Replace a known URI inside arbitrary text with its redacted form.
+
+    PyMongo exception reprs can echo back the URI they were given —
+    password included. Anything that prints an exception next to a URI
+    must run the text through this first.
+    """
+    if not uri or uri not in details:
+        return details
+    return details.replace(uri, redact_uri(uri))
+
+
 def _uri_uses_tls(uri: str) -> bool:
     """True iff the URI implies TLS — either mongodb+srv:// (TLS by default
     per the spec) or an explicit tls=true / ssl=true query parameter."""

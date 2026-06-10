@@ -25,7 +25,7 @@ import random
 import sys
 from datetime import datetime, timedelta, timezone
 
-from pymongo import MongoClient
+from mongosemantic.db.client import MongoConnection, redact_uri, scrub_uri
 
 random.seed(7)
 
@@ -575,13 +575,16 @@ def _recipes() -> list[dict]:
 
 # ---------------------------------------------------------------------------
 def main() -> int:
-    client = MongoClient(URI, serverSelectionTimeoutMS=5000)
-    db = client[DB_NAME]
+    # MongoConnection.open gets us the certifi-backed TLS config the CLI
+    # uses; a bare MongoClient fails cert verification on macOS Pythons
+    # without a system CA bundle.
     try:
-        client.admin.command("ping")
+        conn = MongoConnection.open(URI, DB_NAME)
     except Exception as e:
-        print(f"could not reach {URI}: {e}", file=sys.stderr)
+        print(f"could not reach {redact_uri(URI)}: {scrub_uri(str(e), URI)}", file=sys.stderr)
         return 2
+    client = conn.client
+    db = conn.db
 
     user_collections = ("articles", "products", "recipes",
                         "longform")  # legacy from earlier demo runs
@@ -607,7 +610,7 @@ def main() -> int:
     db["products"].insert_many(products)
     db["recipes"].insert_many(recipes)
 
-    print(f"Seeded {DB_NAME}@{URI}:")
+    print(f"Seeded {DB_NAME}@{redact_uri(URI)}:")
     print(f"  articles : {len(articles)} docs (multi-field, cross-collection demo)")
     print(f"  products : {len(products)} docs (inline-mode demo)")
     print(f"  recipes  : {len(recipes)} long-form docs (chunking demo)")
