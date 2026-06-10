@@ -1,9 +1,10 @@
-"""Hybrid search: combine semantic (`$vectorSearch`) and keyword (`$search`)
-results via `$rankFusion`, MongoDB Atlas's reciprocal-rank-fusion stage.
+"""Hybrid search: build the Atlas `$rankFusion` pipeline that fuses semantic
+(`$vectorSearch`) and keyword (`$search`) results server-side.
 
-Atlas-only — `$rankFusion` and `$search` don't exist on self-hosted Mongo.
-The CLI / web / MCP layers detect the topology and fall back to pure
-semantic with a clear notice.
+This module is the Atlas-native path only — `$rankFusion` and `$search`
+don't exist on self-hosted Mongo. Non-Atlas topologies (and Atlas clusters
+whose Search indexes are missing or cap-blocked) get hybrid via the
+client-side RRF implementation in `search/local_hybrid.py` instead.
 """
 from __future__ import annotations
 

@@ -205,6 +205,46 @@ def test_invalid_filter_json_exits_2(monkeypatch):
     assert "json" in r.output.lower()  # FilterError message, not typer usage error
 
 
+def test_filter_rejected_at_runtime_exits_2_with_friendly_message(monkeypatch):
+    """A filter that parses as JSON but is rejected by MongoDB at runtime
+    (unknown operator, type mismatch, ...) is user input — friendly exit 2,
+    not a traceback."""
+    from pymongo.errors import OperationFailure
+
+    db = _setup(monkeypatch)
+    fake_provider = MagicMock()
+    fake_provider.embed = lambda q: np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    with patch("mongosemantic.commands.search.MongoConnection.open",
+               return_value=_fake_conn(db)), \
+         patch("mongosemantic.commands.search.get_provider", return_value=fake_provider), \
+         patch("mongosemantic.commands.search._run_one",
+               side_effect=OperationFailure("unknown operator $regexx")):
+        r = runner.invoke(app, ["search", "q", "--collection", "articles",
+                                "--filter", '{"plot": {"$regexx": "x"}}'])
+    assert r.exit_code == 2
+    assert "Filter rejected by MongoDB" in r.output
+    assert "$regexx" in r.output
+
+
+def test_operation_failure_without_filter_still_propagates(monkeypatch):
+    """No filter -> an OperationFailure is a genuine server error and must
+    NOT be swallowed into the friendly filter message."""
+    from pymongo.errors import OperationFailure
+
+    db = _setup(monkeypatch)
+    fake_provider = MagicMock()
+    fake_provider.embed = lambda q: np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    with patch("mongosemantic.commands.search.MongoConnection.open",
+               return_value=_fake_conn(db)), \
+         patch("mongosemantic.commands.search.get_provider", return_value=fake_provider), \
+         patch("mongosemantic.commands.search._run_one",
+               side_effect=OperationFailure("server exploded")):
+        r = runner.invoke(app, ["search", "q", "--collection", "articles"])
+    assert r.exit_code != 0
+    assert isinstance(r.exception, OperationFailure)
+    assert "Filter rejected" not in r.output
+
+
 # --- --rerank ---------------------------------------------------------------
 
 def _fake_rows(n):
@@ -267,6 +307,40 @@ def test_hybrid_available_shadow_any_topology_inline_never():
         created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc),
     )
     assert hybrid_available(inline_cfg, Topology.ATLAS) is False
+
+
+def test_atlas_native_hybrid_ready_checks_resolved_vector_index_name():
+    """Migrated collections store a renamed vector index (e.g. `_mig_<ts>`) in
+    cfg.vector_index_names — readiness must check THAT name (the one the
+    $rankFusion pipeline queries), not the recomputed default."""
+    from mongosemantic.commands.search import _atlas_native_hybrid_ready
+    from mongosemantic.search.hybrid import search_index_name
+
+    db = mongomock.MongoClient()["d"]
+    cfg = CollectionConfig(
+        collection="articles", mode="shadow", shadow_collection="articles_embeddings",
+        fields=[FieldSpec(path="body")], embedding_model="local-fast", embedding_dim=3,
+        created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc),
+        vector_index_names={"body": "_mig_123"},
+    )
+    existing = {"_mig_123", search_index_name("articles", "body")}
+
+    def fake_exists(_target, name):
+        return name in existing
+
+    with patch("mongosemantic.commands.search.atlas_search_index_exists",
+               side_effect=fake_exists) as exists:
+        assert _atlas_native_hybrid_ready(db, cfg, "articles", "body") is True
+    # Both probes ran against the stored/derived names.
+    assert {c.args[1] for c in exists.call_args_list} == existing
+
+    # Counter-case: only the DEFAULT-named vector index exists (pre-migration
+    # leftover) -> not ready, because `_mig_123` is what the pipeline queries.
+    from mongosemantic.db.indexes import vector_index_name
+    existing = {vector_index_name("articles", "body"), search_index_name("articles", "body")}
+    with patch("mongosemantic.commands.search.atlas_search_index_exists",
+               side_effect=fake_exists):
+        assert _atlas_native_hybrid_ready(db, cfg, "articles", "body") is False
 
 
 def test_run_one_hybrid_standalone_uses_client_side_rrf():

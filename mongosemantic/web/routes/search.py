@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import re
 import time
 from datetime import date, datetime
@@ -11,6 +12,7 @@ from uuid import UUID
 from bson import ObjectId, json_util
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+from pymongo.errors import OperationFailure
 
 from mongosemantic.commands.search import _run_one, hybrid_available, run_one_hybrid
 from mongosemantic.config import Settings
@@ -20,6 +22,8 @@ from mongosemantic.search.filtering import FilterError, parse_filter, prefilter_
 from mongosemantic.search.rerank import RERANK_CANDIDATE_MULTIPLIER, get_reranker, rerank_reason
 from mongosemantic.state import load_config
 from mongosemantic.web.identifiers import IdentifierError, validate_identifier
+
+log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -183,6 +187,11 @@ def search(
         source_filter = parse_filter(filter) if filter else None
     except FilterError as e:
         raise HTTPException(status_code=400, detail=f"invalid filter: {e}") from e
+    if rerank and limit > 1000:
+        raise HTTPException(
+            status_code=400,
+            detail="rerank supports limit <= 1000 (cross-encoder cost grows linearly)",
+        )
     # Rerank over-fetches so the cross-encoder has candidates to promote.
     fetch_limit = limit * RERANK_CANDIDATE_MULTIPLIER if rerank else limit
     settings = Settings.from_environment()
@@ -225,10 +234,12 @@ def search(
                 return None
             # Pre-filter source _ids ONCE per collection; every per-field
             # HNSW query shares the same allow-list. allowed_ids=None means
-            # "no filter"; an empty list legitimately yields zero rows.
+            # "no filter" (an empty `{}` counts — it matches everything, so
+            # building a full-collection allow-list would be pure waste); an
+            # empty list legitimately yields zero rows.
             allowed = (
                 prefilter_source_ids(db, cfg.collection, source_filter)
-                if source_filter is not None
+                if source_filter
                 else None
             )
             merged: list[dict] = []
@@ -257,36 +268,53 @@ def search(
             return _run_one(db, cfg, name, qv, fetch_limit, conn.topology,
                             source_filter=source_filter)
 
-        if collection:
-            cfg = load_config(db, collection)
-            if not cfg:
-                raise HTTPException(status_code=400, detail=f"{collection} is not configured")
-            if hybrid and not hybrid_available(cfg, conn.topology):
-                notice = "hybrid requires shadow mode; returned pure semantic results"
-            rows = _run(cfg, collection)
-        else:
-            targets = per_collection_targets(db)
-            if not targets:
-                raise HTTPException(status_code=400, detail="no collections configured")
-            all_rows: list[dict] = []
-            models: dict[str, str] = {}
-            for name in targets:
-                cfg = load_config(db, name)
-                if cfg is None:
-                    continue
-                models[name] = cfg.embedding_model
-                all_rows.extend(_run(cfg, name))
-            if len(set(models.values())) > 1:
-                all_rows = min_max_normalize(all_rows, "score")
-            all_rows.sort(key=lambda r: r.get("score", 0), reverse=True)
-            rows = all_rows[:fetch_limit]
+        try:
+            if collection:
+                cfg = load_config(db, collection)
+                if not cfg:
+                    raise HTTPException(status_code=400, detail=f"{collection} is not configured")
+                if hybrid and not hybrid_available(cfg, conn.topology):
+                    notice = "hybrid requires shadow mode; returned pure semantic results"
+                rows = _run(cfg, collection)
+            else:
+                targets = per_collection_targets(db)
+                if not targets:
+                    raise HTTPException(status_code=400, detail="no collections configured")
+                all_rows: list[dict] = []
+                models: dict[str, str] = {}
+                for name in targets:
+                    cfg = load_config(db, name)
+                    if cfg is None:
+                        continue
+                    models[name] = cfg.embedding_model
+                    all_rows.extend(_run(cfg, name))
+                if len(set(models.values())) > 1:
+                    all_rows = min_max_normalize(all_rows, "score")
+                all_rows.sort(key=lambda r: r.get("score", 0), reverse=True)
+                rows = all_rows[:fetch_limit]
+        except OperationFailure as e:
+            # Filters pass through to MongoDB verbatim; a runtime rejection
+            # (unknown operator, type mismatch, ...) is user input, not a
+            # server bug. Without a filter an OperationFailure is a genuine
+            # server error and keeps propagating as a 500.
+            if not source_filter:
+                raise
+            raise HTTPException(
+                status_code=400, detail=f"filter rejected by MongoDB: {e}"
+            ) from e
         if rerank:
             reranker = get_reranker()
             if reranker is not None:
                 # One rerank over the merged rows: cross-encoder scores are
                 # comparable across embedding models, which incidentally
                 # fixes mixed-model ordering too.
-                rows = reranker.rerank(q, rows, limit)
+                try:
+                    rows = reranker.rerank(q, rows, limit)
+                except Exception as e:  # degrade to vector order, never 500
+                    log.exception("rerank failed; returning vector-ranked results")
+                    msg = f"rerank failed: {e}"
+                    notice = f"{notice}; {msg}" if notice else msg
+                    rows = rows[:limit]
             else:
                 msg = f"rerank unavailable: {rerank_reason()}"
                 notice = f"{notice}; {msg}" if notice else msg

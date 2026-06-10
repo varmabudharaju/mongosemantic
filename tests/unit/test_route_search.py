@@ -252,6 +252,82 @@ def test_search_filter_param_invalid_returns_400(monkeypatch):
     assert "filter" in r.json()["detail"]
 
 
+def test_search_filter_rejected_at_runtime_returns_400(monkeypatch):
+    """A filter that parses as JSON but is rejected by MongoDB at runtime
+    (unknown operator, type mismatch, ...) is user input -> 400, not 500."""
+    from pymongo.errors import OperationFailure
+
+    client, db = _client_db(monkeypatch)
+    _save_shadow_cfg(db)
+    with patch("mongosemantic.web.routes.search.MongoConnection.open", return_value=_conn(db)), \
+         patch.object(client.app.state.providers, "get", return_value=_fake_provider()), \
+         patch.object(client.app.state.hnsw, "query", return_value=None), \
+         patch("mongosemantic.web.routes.search._run_one",
+               side_effect=OperationFailure("unknown top level operator: $regexx")):
+        r = client.get("/api/search", params={
+            "q": "x", "collection": "articles",
+            "filter": '{"year": {"$gte": 1960}}',
+        })
+    assert r.status_code == 400, r.text
+    detail = r.json()["detail"]
+    assert "filter rejected by MongoDB" in detail
+    assert "$regexx" in detail
+
+
+def test_search_operation_failure_without_filter_stays_500(monkeypatch):
+    """No filter -> an OperationFailure is a genuine server error and must
+    NOT be downgraded to a 400."""
+    from pymongo.errors import OperationFailure
+
+    _, db = _client_db(monkeypatch)
+    _save_shadow_cfg(db)
+    client = TestClient(create_app(), raise_server_exceptions=False)
+    with patch("mongosemantic.web.routes.search.MongoConnection.open", return_value=_conn(db)), \
+         patch.object(client.app.state.providers, "get", return_value=_fake_provider()), \
+         patch.object(client.app.state.hnsw, "query", return_value=None), \
+         patch("mongosemantic.web.routes.search._run_one",
+               side_effect=OperationFailure("server exploded")):
+        r = client.get("/api/search", params={"q": "x", "collection": "articles"})
+    assert r.status_code == 500
+
+
+def test_search_rerank_limit_capped_at_1000(monkeypatch):
+    """Cross-encoder cost grows linearly with limit; the web route bounds it."""
+    client, db = _client_db(monkeypatch)
+    _save_shadow_cfg(db)
+    r = client.get("/api/search", params={
+        "q": "x", "collection": "articles", "limit": 1001, "rerank": "true",
+    })
+    assert r.status_code == 400, r.text
+    assert "rerank supports limit <= 1000" in r.json()["detail"]
+
+
+def test_search_rerank_runtime_failure_degrades_with_notice(monkeypatch):
+    """A reranker that loads but blows up at query time must degrade to
+    vector-ranked rows with a notice — never a 500."""
+    client, db = _client_db(monkeypatch)
+    _save_shadow_cfg(db)
+    fake_rows = [_row(0.9, "one"), _row(0.8, "two"), _row(0.7, "three")]
+
+    class ExplodingReranker:
+        def rerank(self, query, rows, limit):
+            raise RuntimeError("CUDA out of memory")
+
+    with patch("mongosemantic.web.routes.search.MongoConnection.open", return_value=_conn(db)), \
+         patch.object(client.app.state.providers, "get", return_value=_fake_provider()), \
+         patch.object(client.app.state.hnsw, "query", return_value=None), \
+         patch("mongosemantic.web.routes.search._run_one", return_value=fake_rows), \
+         patch("mongosemantic.web.routes.search.get_reranker", return_value=ExplodingReranker()):
+        r = client.get("/api/search", params={
+            "q": "x", "collection": "articles", "limit": 2, "rerank": "true",
+        })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "rerank failed" in (body["notice"] or "")
+    # Vector order preserved, truncated back to limit.
+    assert [row["chunk_text"] for row in body["rows"]] == ["one", "two"]
+
+
 def test_search_rerank_param(monkeypatch):
     client, db = _client_db(monkeypatch)
     _save_shadow_cfg(db)

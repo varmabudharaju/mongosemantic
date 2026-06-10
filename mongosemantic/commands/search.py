@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import typer
+from pymongo.errors import OperationFailure
 from rich.console import Console
 from rich.table import Table
 
@@ -111,11 +112,16 @@ def hybrid_available(cfg, topology: Topology) -> bool:
 
 def _atlas_native_hybrid_ready(db, cfg, collection: str, field_path: str) -> bool:
     """True when both Atlas indexes ($vectorSearch + $search) exist on the shadow,
-    i.e. the server-side $rankFusion path can actually answer."""
+    i.e. the server-side $rankFusion path can actually answer.
+
+    The vector index is checked under its RESOLVED name — migrations record an
+    override in cfg.vector_index_names, and that is the name the $rankFusion
+    pipeline actually queries."""
     shadow = db[cfg.shadow_collection]
+    vname = _resolved_vector_index_name(cfg, field_path)
     stored_search = (cfg.search_index_names or {}).get(field_path)
     sname = stored_search or search_index_name(collection, field_path)
-    return atlas_vector_index_exists(shadow, collection, field_path) and \
+    return atlas_search_index_exists(shadow, vname) and \
         atlas_search_index_exists(shadow, sname)
 
 
@@ -213,42 +219,55 @@ def search_cmd(
             return _run_one(db, cfg, name, qv, fetch_limit, conn.topology,
                             source_filter=source_filter)
 
-        if collection:
-            cfg = load_config(db, collection)
-            if not cfg:
-                raise NotConfiguredError(f"{collection} not configured")
-            if hybrid and not hybrid_available(cfg, conn.topology):
-                console.print(
-                    "[yellow]Hybrid search requires shadow-mode collections "
-                    "(inline mode has no chunk_text column to keyword-search). "
-                    "Falling back to pure semantic.[/yellow]"
-                )
-            rows = _run(cfg, collection)
-            if (hybrid and not rows and hybrid_available(cfg, conn.topology)
-                    and conn.topology == Topology.ATLAS):
-                console.print(
-                    "[yellow]Hybrid returned no rows. Both Atlas indexes (vectorSearch "
-                    "+ search) must exist and be queryable — they build for ~30–90 s "
-                    "after `apply`, and on free tier the 3-index cluster cap can block "
-                    "their creation (apply reports this). Check the cluster's Search "
-                    "tab, or retry without --hybrid.[/yellow]"
-                )
-        else:
-            all_rows: list[dict] = []
-            targets = per_collection_targets(db)
-            if not targets:
-                raise NotConfiguredError("No collections are configured.")
-            models_per_collection: dict[str, str] = {}
-            for name in targets:
-                cfg = load_config(db, name)
-                if cfg is None:
-                    continue
-                models_per_collection[name] = cfg.embedding_model
-                all_rows.extend(_run(cfg, name))
-            if len(set(models_per_collection.values())) > 1:
-                all_rows = min_max_normalize(all_rows, "score")
-            all_rows.sort(key=lambda r: r.get("score", 0.0), reverse=True)
-            rows = all_rows[:fetch_limit]
+        try:
+            if collection:
+                cfg = load_config(db, collection)
+                if not cfg:
+                    raise NotConfiguredError(f"{collection} not configured")
+                if hybrid and not hybrid_available(cfg, conn.topology):
+                    console.print(
+                        "[yellow]Hybrid search requires shadow-mode collections "
+                        "(inline mode has no chunk_text column to keyword-search). "
+                        "Falling back to pure semantic.[/yellow]"
+                    )
+                rows = _run(cfg, collection)
+                # A filter that legitimately matches nothing is not an index
+                # problem, so the diagnostic only fires for unfiltered runs.
+                if (hybrid and not rows and not source_filter
+                        and hybrid_available(cfg, conn.topology)
+                        and conn.topology == Topology.ATLAS):
+                    console.print(
+                        "[yellow]Hybrid returned no rows. Both Atlas indexes (vectorSearch "
+                        "+ search) must exist and be queryable — they build for ~30–90 s "
+                        "after `apply`, and on free tier the 3-index cluster cap can block "
+                        "their creation (apply reports this). Check the cluster's Search "
+                        "tab, or retry without --hybrid.[/yellow]"
+                    )
+            else:
+                all_rows: list[dict] = []
+                targets = per_collection_targets(db)
+                if not targets:
+                    raise NotConfiguredError("No collections are configured.")
+                models_per_collection: dict[str, str] = {}
+                for name in targets:
+                    cfg = load_config(db, name)
+                    if cfg is None:
+                        continue
+                    models_per_collection[name] = cfg.embedding_model
+                    all_rows.extend(_run(cfg, name))
+                if len(set(models_per_collection.values())) > 1:
+                    all_rows = min_max_normalize(all_rows, "score")
+                all_rows.sort(key=lambda r: r.get("score", 0.0), reverse=True)
+                rows = all_rows[:fetch_limit]
+        except OperationFailure as e:
+            # Filters pass through to MongoDB verbatim; a runtime rejection
+            # (unknown operator, type mismatch, ...) is user input, not a bug.
+            # Without a filter an OperationFailure is a genuine server error
+            # and keeps propagating.
+            if not source_filter:
+                raise
+            console.print(f"[red]Filter rejected by MongoDB: {e}[/red]")
+            raise typer.Exit(code=2) from e
 
         if rerank:
             reranker = get_reranker()
