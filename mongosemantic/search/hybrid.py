@@ -15,6 +15,7 @@ from mongosemantic.db.queries import (
     lookup_source_stage,
     unwind_source_stage,
 )
+from mongosemantic.search.filtering import prefix_source_filter
 
 
 def search_index_name(collection: str, field_path: str) -> str:
@@ -37,6 +38,8 @@ def build_hybrid_pipeline(
     search_index_name: str,
     vector_weight: float = 0.6,
     text_weight: float = 0.4,
+    source_filter: dict[str, Any] | None = None,
+    oversample: int = 5,
 ) -> list[dict[str, Any]]:
     """Build a `$rankFusion`-based hybrid search pipeline against a shadow collection.
 
@@ -46,7 +49,8 @@ def build_hybrid_pipeline(
     if vector_weight <= 0 or text_weight <= 0:
         raise ValueError("hybrid weights must be positive")
 
-    num_candidates = max(10 * limit, 100)
+    fetch_limit = limit * oversample if source_filter else limit
+    num_candidates = max(10 * fetch_limit, 100)
 
     vector_sub = [
         {
@@ -55,7 +59,7 @@ def build_hybrid_pipeline(
                 "path": "embedding",
                 "queryVector": query_vector,
                 "numCandidates": num_candidates,
-                "limit": limit,
+                "limit": fetch_limit,
             }
         },
         {"$match": {"field_path": field_path}},
@@ -69,10 +73,10 @@ def build_hybrid_pipeline(
             }
         },
         {"$match": {"field_path": field_path}},
-        {"$limit": limit},
+        {"$limit": fetch_limit},
     ]
 
-    return [
+    pipeline: list[dict[str, Any]] = [
         {
             "$rankFusion": {
                 "input": {"pipelines": {"vector": vector_sub, "text": text_sub}},
@@ -85,10 +89,14 @@ def build_hybrid_pipeline(
             }
         },
         {"$match": {"field_path": field_path}},
-        {"$limit": limit},
+        {"$limit": fetch_limit},
         lookup_source_stage(source_collection),
         unwind_source_stage(),
-        # Numeric fused score (sortable downstream). scoreDetails is a dict
-        # and would break commands/search.py's sort-by-score.
-        base_projection({"$meta": "score"}),
     ]
+    if source_filter:
+        pipeline.append({"$match": prefix_source_filter(source_filter)})
+        pipeline.append({"$limit": limit})
+    # Numeric fused score (sortable downstream). scoreDetails is a dict
+    # and would break commands/search.py's sort-by-score.
+    pipeline.append(base_projection({"$meta": "score"}))
+    return pipeline

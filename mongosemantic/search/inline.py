@@ -62,22 +62,28 @@ def build_inline_atlas_pipeline(
     limit: int,
     index_name: str,
     filter_match: dict[str, Any] | None = None,
+    source_filter: dict[str, Any] | None = None,
+    oversample: int = 5,
 ) -> list[dict[str, Any]]:
     """Atlas $vectorSearch against the inline embedding path on the source collection."""
     emb_path = inline_embedding_path(field_path)
     text_path = inline_text_path(field_path)
-    num_candidates = max(10 * limit, 100)
+    fetch_limit = limit * oversample if source_filter else limit
+    num_candidates = max(10 * fetch_limit, 100)
     vector_search: dict[str, Any] = {
         "index": index_name,
         "path": emb_path,
         "queryVector": query_vector,
         "numCandidates": num_candidates,
-        "limit": limit,
+        "limit": fetch_limit,
     }
     if filter_match:
         vector_search["filter"] = filter_match
-    return [
-        {"$vectorSearch": vector_search},
+    pipeline: list[dict[str, Any]] = [{"$vectorSearch": vector_search}]
+    if source_filter:
+        pipeline.append({"$match": source_filter})
+        pipeline.append({"$limit": limit})
+    pipeline.append(
         {
             "$project": {
                 "source_id": "$_id",
@@ -87,5 +93,6 @@ def build_inline_atlas_pipeline(
                 "source_doc": "$$ROOT",
                 "score": {"$meta": "vectorSearchScore"},
             }
-        },
-    ]
+        }
+    )
+    return pipeline
