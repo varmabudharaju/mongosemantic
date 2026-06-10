@@ -101,9 +101,14 @@ class HnswIndexManager:
         field_path: str,
         query_vec: list[float],
         limit: int,
+        allowed_ids: list | None = None,
     ) -> list[dict] | None:
         """Return top-k rows from the HNSW index, or None if no index
-        is loaded for this (collection, field, model)."""
+        is loaded for this (collection, field, model).
+
+        If *allowed_ids* is given (not None), only chunks whose source_id
+        appears in that list are eligible.  An empty list returns [] immediately.
+        """
         if cfg.mode != "shadow" or not cfg.shadow_collection:
             return None
         key = (cfg.collection, field_path, cfg.embedding_model)
@@ -118,7 +123,25 @@ class HnswIndexManager:
             if k <= 0:
                 return []
             qv = np.asarray([query_vec], dtype=np.float32)
-            ids, distances = loaded.index.knn_query(qv, k=k)
+
+            filter_fn = None
+            if allowed_ids is not None:
+                allowed = set(allowed_ids)
+                allowed_labels = {
+                    i for i, (sid, _ci) in enumerate(loaded.mapping)
+                    if sid in allowed
+                }
+                if not allowed_labels:
+                    return []
+                k = min(k, len(allowed_labels))
+                filter_fn = allowed_labels.__contains__
+
+            try:
+                ids, distances = loaded.index.knn_query(qv, k=k, filter=filter_fn)
+            except RuntimeError:
+                # hnswlib can fail to fill k results under a tight filter; signal
+                # "no HNSW answer" so the caller falls back to exact brute force.
+                return None
         except Exception:
             log.exception("HNSW query failed for %s; falling back to brute", key)
             return None

@@ -167,3 +167,74 @@ def test_stale_tracking(tmp_path: Path):
     # Just built — no rebuild even if marked stale.
     mgr.mark_stale(key, n=10)
     assert mgr.should_rebuild(key) is False
+
+
+def test_query_with_allowed_ids_filters_results(tmp_path: Path):
+    """query(allowed_ids=subset) must return only rows whose source_id is in
+    the subset, and must return at least one row when the subset is non-empty
+    and the index contains matching vectors."""
+    db = mongomock.MongoClient()["d"]
+    cfg = _cfg(dim=4)
+    # 4 vectors in 4-d space; each is a basis vector for easy scoring.
+    vectors = [
+        _norm(np.array([1, 0, 0, 0])),   # doc-0
+        _norm(np.array([0, 1, 0, 0])),   # doc-1
+        _norm(np.array([0, 0, 1, 0])),   # doc-2
+        _norm(np.array([0, 0, 0, 1])),   # doc-3
+    ]
+    _seed_shadow(db, "wines", "description", "local-fast", vectors)
+    mgr = HnswIndexManager(cache_dir=tmp_path)
+    mgr.build(db, cfg, "description")
+
+    # Allow only doc-0 and doc-1; query toward doc-0.
+    allowed = ["doc-0", "doc-1"]
+    query = _norm(np.array([1, 0, 0, 0]))
+    rows = mgr.query(db, cfg, "description", query, limit=4,
+                     allowed_ids=allowed)
+    assert rows is not None
+    assert len(rows) >= 1
+    returned_ids = {r["source_id"] for r in rows}
+    assert returned_ids.issubset(set(allowed)), (
+        f"Expected only ids in {allowed}, got {returned_ids}"
+    )
+
+
+def test_query_with_empty_allowed_ids_returns_empty(tmp_path: Path):
+    """allowed_ids=[] means no document is permitted; must return [] (not None)
+    so the caller knows HNSW answered and there is nothing to show."""
+    db = mongomock.MongoClient()["d"]
+    cfg = _cfg(dim=4)
+    vectors = [
+        _norm(np.array([1, 0, 0, 0])),
+        _norm(np.array([0, 1, 0, 0])),
+    ]
+    _seed_shadow(db, "wines", "description", "local-fast", vectors)
+    mgr = HnswIndexManager(cache_dir=tmp_path)
+    mgr.build(db, cfg, "description")
+
+    rows = mgr.query(db, cfg, "description", [1.0, 0, 0, 0], limit=5,
+                     allowed_ids=[])
+    assert rows == [], f"Expected [], got {rows!r}"
+
+
+def test_query_without_allowed_ids_unchanged(tmp_path: Path):
+    """Omitting allowed_ids (default None) must not change existing behavior:
+    all indexed docs are eligible and at least top-k are returned."""
+    db = mongomock.MongoClient()["d"]
+    cfg = _cfg(dim=4)
+    vectors = [
+        _norm(np.array([1, 0, 0, 0])),   # doc-0 — exact match
+        _norm(np.array([0, 1, 0, 0])),   # doc-1
+        _norm(np.array([0, 0, 1, 0])),   # doc-2
+    ]
+    _seed_shadow(db, "wines", "description", "local-fast", vectors)
+    mgr = HnswIndexManager(cache_dir=tmp_path)
+    mgr.build(db, cfg, "description")
+
+    query = _norm(np.array([1, 0, 0, 0]))
+    rows = mgr.query(db, cfg, "description", query, limit=3)
+    assert rows is not None
+    assert len(rows) == 3
+    # Nearest to query=[1,0,0,0] is doc-0.
+    assert rows[0]["source_id"] == "doc-0"
+    assert rows[0]["score"] == pytest.approx(1.0, rel=1e-4)
