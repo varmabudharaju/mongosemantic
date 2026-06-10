@@ -16,6 +16,8 @@ from mongosemantic.commands.search import _run_one, hybrid_available, run_one_hy
 from mongosemantic.config import Settings
 from mongosemantic.db.client import MongoConnection, Topology
 from mongosemantic.search.cross_collection import min_max_normalize, per_collection_targets
+from mongosemantic.search.filtering import FilterError, parse_filter, prefilter_source_ids
+from mongosemantic.search.rerank import RERANK_CANDIDATE_MULTIPLIER, get_reranker, rerank_reason
 from mongosemantic.state import load_config
 from mongosemantic.web.identifiers import IdentifierError, validate_identifier
 
@@ -62,7 +64,8 @@ def _safe(v: object) -> object | None:
 def _serialize(row: dict) -> dict:
     out = {
         k: row[k]
-        for k in ("source_id", "source_collection", "field_path", "chunk_index", "chunk_text", "score")
+        for k in ("source_id", "source_collection", "field_path", "chunk_index",
+                  "chunk_text", "score", "vector_score", "reranked")
         if k in row
     }
     src = row.get("source_doc")
@@ -161,6 +164,12 @@ def search(
     limit: int = Query(10, ge=1, le=100_000),
     hybrid: bool = Query(False),
     min_score: float = Query(0.0, ge=0.0, le=1.0),
+    # MongoDB query document applied to SOURCE documents (JSON string),
+    # e.g. {"year": {"$gte": 1960}}.
+    filter: str | None = Query(None),
+    # Two-stage retrieval: over-fetch candidates, re-score with a local
+    # cross-encoder, return the top `limit`.
+    rerank: bool = Query(False),
     # `format=csv` and `format=jsonl` stream the same result set as a
     # download instead of returning the in-page JSON envelope.
     format: str = Query("json", pattern="^(json|csv|jsonl)$"),
@@ -170,6 +179,12 @@ def search(
             validate_identifier(collection)
         except IdentifierError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
+    try:
+        source_filter = parse_filter(filter) if filter else None
+    except FilterError as e:
+        raise HTTPException(status_code=400, detail=f"invalid filter: {e}") from e
+    # Rerank over-fetches so the cross-encoder has candidates to promote.
+    fetch_limit = limit * RERANK_CANDIDATE_MULTIPLIER if rerank else limit
     settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     notice: str | None = None
@@ -208,19 +223,30 @@ def search(
             """
             if hnsw is None or cfg.mode != "shadow":
                 return None
+            # Pre-filter source _ids ONCE per collection; every per-field
+            # HNSW query shares the same allow-list. allowed_ids=None means
+            # "no filter"; an empty list legitimately yields zero rows.
+            allowed = (
+                prefilter_source_ids(db, cfg.collection, source_filter)
+                if source_filter is not None
+                else None
+            )
             merged: list[dict] = []
             for spec in cfg.fields:
-                rows = hnsw.query(db, cfg, spec.path, qv, limit)
+                rows = hnsw.query(db, cfg, spec.path, qv, fetch_limit, allowed_ids=allowed)
                 if rows is None:
                     return None
                 merged.extend(rows)
             merged.sort(key=lambda r: r.get("score", 0), reverse=True)
-            return merged[:limit]
+            return merged[:fetch_limit]
 
         def _run(cfg, name):
             qv = _qvec(cfg.embedding_model)
             if hybrid and hybrid_available(cfg, conn.topology):
-                return run_one_hybrid(db, cfg, name, q, qv, limit, conn.topology)
+                # Pass the route's HNSW manager so the hybrid vector leg
+                # uses ANN when an index is loaded.
+                return run_one_hybrid(db, cfg, name, q, qv, fetch_limit, conn.topology,
+                                      source_filter=source_filter, hnsw=hnsw)
             # Non-Atlas shadow setups try HNSW first; brute-force agg is
             # the universal fallback for inline mode, missing indexes, or
             # any unexpected runtime error inside the HNSW path.
@@ -228,14 +254,15 @@ def search(
                 fast = _try_hnsw(cfg, qv)
                 if fast is not None:
                     return fast
-            return _run_one(db, cfg, name, qv, limit, conn.topology)
+            return _run_one(db, cfg, name, qv, fetch_limit, conn.topology,
+                            source_filter=source_filter)
 
         if collection:
             cfg = load_config(db, collection)
             if not cfg:
                 raise HTTPException(status_code=400, detail=f"{collection} is not configured")
             if hybrid and not hybrid_available(cfg, conn.topology):
-                notice = "hybrid requires Atlas + shadow mode — falling back to pure semantic"
+                notice = "hybrid requires shadow mode; returned pure semantic results"
             rows = _run(cfg, collection)
         else:
             targets = per_collection_targets(db)
@@ -252,10 +279,22 @@ def search(
             if len(set(models.values())) > 1:
                 all_rows = min_max_normalize(all_rows, "score")
             all_rows.sort(key=lambda r: r.get("score", 0), reverse=True)
-            rows = all_rows[:limit]
-        # Apply score threshold AFTER ranking and limit so users still see
-        # the top N even if all are below threshold (we surface the gap in
-        # the UI rather than returning an empty list silently).
+            rows = all_rows[:fetch_limit]
+        if rerank:
+            reranker = get_reranker()
+            if reranker is not None:
+                # One rerank over the merged rows: cross-encoder scores are
+                # comparable across embedding models, which incidentally
+                # fixes mixed-model ordering too.
+                rows = reranker.rerank(q, rows, limit)
+            else:
+                msg = f"rerank unavailable: {rerank_reason()}"
+                notice = f"{notice}; {msg}" if notice else msg
+                rows = rows[:limit]
+        # Apply score threshold AFTER ranking/rerank and limit so users still
+        # see the top N even if all are below threshold (we surface the gap
+        # in the UI rather than returning an empty list silently). Rerank
+        # rescales scores, so the threshold must run on the final values.
         if min_score > 0:
             rows = [r for r in rows if r.get("score", 0) >= min_score]
         took_ms = int((time.perf_counter() - started) * 1000)

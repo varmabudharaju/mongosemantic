@@ -191,3 +191,134 @@ def test_search_rejects_unconfigured(monkeypatch):
          patch.object(client.app.state.providers, "get", return_value=fake_provider):
         r = client.get("/api/search?q=hello&collection=missing")
         assert r.status_code == 400
+
+
+# --- filter / rerank / hybrid-anywhere (0.9 tier-1 search quality) ----------
+
+
+def _save_shadow_cfg(db, collection="articles", mode="shadow"):
+    save_config(db, CollectionConfig(
+        collection=collection, mode=mode,
+        shadow_collection=f"{collection}_embeddings" if mode == "shadow" else None,
+        fields=[FieldSpec(path="body")], embedding_model="local-fast", embedding_dim=3,
+        created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc),
+    ))
+
+
+def _fake_provider():
+    p = MagicMock()
+    p.embed = lambda q: np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    return p
+
+
+def _row(score, text):
+    return {"source_id": f"id-{text}", "source_collection": "articles",
+            "field_path": "body", "chunk_index": 0, "chunk_text": text, "score": score}
+
+
+def _limit_arg(mock):
+    """The `limit` passed to a patched _run_one, positional or keyword."""
+    call = mock.call_args
+    if "limit" in call.kwargs:
+        return call.kwargs["limit"]
+    return call.args[4]
+
+
+def test_search_filter_param_plumbs_through(monkeypatch):
+    client, db = _client_db(monkeypatch)
+    _save_shadow_cfg(db)
+    run_one = MagicMock(return_value=[_row(0.9, "hit")])
+    with patch("mongosemantic.web.routes.search.MongoConnection.open", return_value=_conn(db)), \
+         patch.object(client.app.state.providers, "get", return_value=_fake_provider()), \
+         patch.object(client.app.state.hnsw, "query", return_value=None), \
+         patch("mongosemantic.web.routes.search._run_one", run_one):
+        r = client.get("/api/search", params={
+            "q": "x", "collection": "articles",
+            "filter": '{"year": {"$gte": 1960}}',
+        })
+    assert r.status_code == 200, r.text
+    assert run_one.call_args.kwargs["source_filter"] == {"year": {"$gte": 1960}}
+
+
+def test_search_filter_param_invalid_returns_400(monkeypatch):
+    client, db = _client_db(monkeypatch)
+    _save_shadow_cfg(db)
+    with patch("mongosemantic.web.routes.search.MongoConnection.open", return_value=_conn(db)), \
+         patch.object(client.app.state.providers, "get", return_value=_fake_provider()):
+        r = client.get("/api/search", params={
+            "q": "x", "collection": "articles", "filter": "{bad",
+        })
+    assert r.status_code == 400
+    assert "filter" in r.json()["detail"]
+
+
+def test_search_rerank_param(monkeypatch):
+    client, db = _client_db(monkeypatch)
+    _save_shadow_cfg(db)
+    fake_rows = [_row(0.9, "one"), _row(0.8, "two"), _row(0.7, "three")]
+    run_one = MagicMock(return_value=fake_rows)
+
+    class FakeReranker:
+        def rerank(self, query, rows, limit):
+            out = []
+            for r in reversed(rows):
+                row = dict(r)
+                row["vector_score"] = row["score"]
+                row["score"] = 0.5
+                row["reranked"] = True
+                out.append(row)
+            return out[:limit]
+
+    with patch("mongosemantic.web.routes.search.MongoConnection.open", return_value=_conn(db)), \
+         patch.object(client.app.state.providers, "get", return_value=_fake_provider()), \
+         patch.object(client.app.state.hnsw, "query", return_value=None), \
+         patch("mongosemantic.web.routes.search._run_one", run_one), \
+         patch("mongosemantic.web.routes.search.get_reranker", return_value=FakeReranker()):
+        r = client.get("/api/search", params={
+            "q": "x", "collection": "articles", "limit": 2, "rerank": "true",
+        })
+    assert r.status_code == 200, r.text
+    # Two-stage retrieval: over-fetch limit * RERANK_CANDIDATE_MULTIPLIER.
+    assert _limit_arg(run_one) == 10
+    rows = r.json()["rows"]
+    assert [row["chunk_text"] for row in rows] == ["three", "two"]
+    assert all(row["reranked"] is True for row in rows)
+    assert all("vector_score" in row for row in rows)
+
+
+def test_search_rerank_unavailable_degrades_with_notice(monkeypatch):
+    client, db = _client_db(monkeypatch)
+    _save_shadow_cfg(db)
+    fake_rows = [_row(0.9, "one"), _row(0.8, "two"), _row(0.7, "three")]
+    with patch("mongosemantic.web.routes.search.MongoConnection.open", return_value=_conn(db)), \
+         patch.object(client.app.state.providers, "get", return_value=_fake_provider()), \
+         patch.object(client.app.state.hnsw, "query", return_value=None), \
+         patch("mongosemantic.web.routes.search._run_one", return_value=fake_rows), \
+         patch("mongosemantic.web.routes.search.get_reranker", return_value=None):
+        r = client.get("/api/search", params={
+            "q": "x", "collection": "articles", "limit": 2, "rerank": "true",
+        })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["notice"] is not None and "rerank" in body["notice"]
+    assert len(body["rows"]) == 2  # truncated back to limit
+
+
+def test_hybrid_non_atlas_runs_hybrid(monkeypatch):
+    """Shadow-mode collections get hybrid on ANY topology now — the old
+    Atlas-only gate is gone."""
+    client, db = _client_db(monkeypatch)
+    _save_shadow_cfg(db)
+    hybrid_mock = MagicMock(return_value=[_row(0.9, "fused")])
+    with patch("mongosemantic.web.routes.search.MongoConnection.open", return_value=_conn(db)), \
+         patch.object(client.app.state.providers, "get", return_value=_fake_provider()), \
+         patch("mongosemantic.web.routes.search.run_one_hybrid", hybrid_mock):
+        r = client.get("/api/search", params={
+            "q": "x", "collection": "articles", "hybrid": "true",
+        })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["notice"] is None
+    hybrid_mock.assert_called_once()
+    # The route's HNSW manager rides along so the vector leg can use ANN.
+    assert hybrid_mock.call_args.kwargs.get("hnsw") is client.app.state.hnsw
