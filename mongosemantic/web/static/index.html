@@ -289,7 +289,7 @@
           <li>Type a natural-language query — describe what you want, don't pick keywords.</li>
           <li>Leave the collection dropdown on <em>All configured collections</em> to fan out, or pick one to scope.</li>
           <li>Press <kbd>Enter</kbd> or click <em>Search</em>.</li>
-          <li>Toggle <em>Hybrid</em> to combine semantic with BM25 keyword (Atlas + shadow only; falls back to pure semantic elsewhere).</li>
+          <li>Toggle <em>Hybrid</em> for semantic + keyword (shadow mode) — works on every topology.</li>
         </ol>
         <span class="try-line"><strong>Try:</strong> <code>spies blackmail cold war Berlin</code>, <code>lonely astronaut stranded</code>, or <code>tragic love story during a war</code>.</span>
       </aside>
@@ -307,6 +307,10 @@
           <input id="search-hybrid" type="checkbox">
           <span>Hybrid (semantic + keyword)</span>
         </label>
+        <label class="hybrid-toggle">
+          <input id="search-rerank" type="checkbox">
+          <span>Rerank (cross-encoder)</span>
+        </label>
         <label class="search-limit">
           <span>Results</span>
           <input id="search-limit" type="number" min="1" step="1" value="10"
@@ -316,6 +320,12 @@
         <label class="search-slider">
           <span>Min score: <strong id="search-min-score-value">0.00</strong></span>
           <input id="search-min-score" type="range" min="0" max="1" step="0.05" value="0">
+        </label>
+        <label class="search-filter">
+          <span>Filter (Mongo query on source fields)</span>
+          <input id="search-filter" type="text" placeholder='{"year": {"$gte": 1960}}'
+                 autocomplete="off" spellcheck="false"
+                 title="Optional Mongo query applied to the source documents before scoring.">
         </label>
       </div>
       <div id="search-export" class="search-export" hidden>

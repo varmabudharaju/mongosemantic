@@ -554,6 +554,22 @@ tbody tr:hover { background: var(--mdb-canvas); }
   border-radius: 6px;
   margin: 0;
 }
+.search-filter {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--mdb-ink-muted);
+  min-width: 240px;
+}
+.search-filter input[type="text"] {
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  border: 1px solid var(--mdb-line);
+  border-radius: 6px;
+  margin: 0;
+}
 .search-slider span strong {
   color: var(--mdb-ink);
   font-family: var(--font-mono);

@@ -10,7 +10,7 @@
   // this is a static mirror so the UI works without a tool-list endpoint.
   const MCP_TOOLS = [
     ["semantic_search", "Find documents in one collection by meaning."],
-    ["hybrid_search", "Combine semantic + BM25 keyword via Atlas $rankFusion. Falls back to pure semantic elsewhere."],
+    ["hybrid_search", "Combine semantic + keyword search (Atlas $rankFusion or client-side RRF). Shadow mode, any topology."],
     ["search_all_collections", "Cross-collection fanout, merged by score."],
     ["list_collections", "Every collection with its configured/not-configured status."],
     ["list_configured", "Just the collections with semantic search wired up."],
@@ -474,7 +474,8 @@
     <h3>3. Search</h3>
     <p>Type a query, hit <strong>Search</strong> or press Enter. Leave the collection dropdown on <em>All configured collections</em> to fan out across every configured collection, or pick one to scope the search.</p>
     <div class="try"><strong>Try:</strong> <code>gear for backpacking trips</code> across all collections. You should see results from both <code>articles</code> (a Southeast Asia backpacking post) and <code>products</code> (a 60L pack, hiking boots).</div>
-    <p><strong>Hybrid</strong> toggle: combines semantic similarity with BM25 keyword matching via Atlas <code>$rankFusion</code>. Useful when a query has both fuzzy meaning and a specific term (a product code, a version number). Requires Atlas + shadow mode; falls back to pure semantic everywhere else with a banner explaining why.</p>
+    <p><strong>Hybrid</strong> toggle: combines semantic similarity with keyword matching — Atlas <code>$rankFusion</code> when both Search indexes exist, client-side reciprocal-rank fusion (a <code>$text</code> index on the shadow's chunk text) everywhere else. Useful when a query has both fuzzy meaning and a specific term (a product code, a version number). Works on any topology; needs shadow mode.</p>
+    <p><strong>Rerank</strong> toggle: re-scores the top candidates with a local cross-encoder for better precision. <strong>Filter</strong> input: a MongoDB query applied to the source documents, e.g. <code>{"year": {"$gte": 1960}}</code>.</p>
 
     <h3>4. Visualize</h3>
     <p>Sampled embeddings projected to 2D via PCA. Points close together are similar by meaning. Hover any point for the source snippet.</p>
@@ -1267,6 +1268,8 @@
       const limitInput = $("#search-limit");
       const minScoreInput = $("#search-min-score");
       const minScoreValue = $("#search-min-score-value");
+      const filterInput = $("#search-filter");
+      const rerankBox = $("#search-rerank");
       const exportBar = $("#search-export");
       // Captures the last successful search params so the export buttons
       // can replay the same query with a format= override.
@@ -1318,6 +1321,17 @@
           exportBar.hidden = true;
           empty.textContent = c.empty_no_query; return;
         }
+        // Validate the filter client-side before anything leaves the
+        // browser — a typo'd filter shouldn't burn a round-trip on a 400.
+        const filterRaw = filterInput.value.trim();
+        if (filterRaw) {
+          try { JSON.parse(filterRaw); }
+          catch (parseErr) {
+            stats.hidden = false;
+            stats.textContent = `Filter is not valid JSON: ${parseErr.message}`;
+            return;
+          }
+        }
         const goBtn = $("#search-go");
         // Restore to the pristine label, never to a snapshot taken mid-run:
         // two overlapping runs (click + debounced filter rerun) would each
@@ -1328,6 +1342,8 @@
         const params = new URLSearchParams({ q, limit: limitInput.value });
         if (sel.value) params.set("collection", sel.value);
         if (hybridBox.checked) params.set("hybrid", "true");
+        if (rerankBox.checked) params.set("rerank", "true");
+        if (filterRaw) params.set("filter", filterRaw);
         if (Number(minScoreInput.value) > 0) params.set("min_score", minScoreInput.value);
         try {
           const r = await fetchJson("GET", "/api/search?" + params.toString());
@@ -1351,6 +1367,11 @@
           empty.textContent = "";
           const scores = _searchRows.map(x => x.score || 0);
           const top = Math.max(...scores), bot = Math.min(...scores);
+          // Normalize bars per result set — RRF (~0.016) and rerank scores
+          // live on very different scales, so absolute widths are useless.
+          // Best bar 100%, worst 5%; single result / equal scores -> 100%.
+          const span = top - bot;
+          const barPct = (s) => (span > 1e-9 ? 5 + (95 * (s - bot)) / span : 100);
           stats.hidden = false;
           stats.textContent =
             `${_searchRows.length} result${_searchRows.length === 1 ? "" : "s"} ` +
@@ -1358,8 +1379,6 @@
             `click any row to inspect the full document`;
           results.innerHTML = _searchRows.map((row, idx) => {
             const score = row.score || 0;
-            // Visual bar — score is already cosine-similarity-ish (0..1).
-            const barPct = Math.max(0, Math.min(100, score * 100));
             return `<li data-idx="${idx}">
               <strong>${score.toFixed(3)}</strong>
               <div>
@@ -1369,8 +1388,9 @@
                   <span>${escapeHtml(row.field_path)}</span>
                   ${row.chunk_index !== null && row.chunk_index !== undefined
                     ? `<span>·</span><span>chunk ${row.chunk_index}</span>` : ""}
+                  ${row.reranked ? `<span class="band band-great">reranked</span>` : ""}
                 </div>
-                <div class="search-score-bar"><span style="width:${barPct}%"></span></div>
+                <div class="search-score-bar"><span style="width:${barPct(score)}%"></span></div>
                 <p>${escapeHtml((row.chunk_text || "").slice(0, 300))}</p>
               </div>
             </li>`;
@@ -1388,6 +1408,7 @@
       const rerunIfQuery = () => { if (input.value.trim()) run(); };
       sel.onchange = rerunIfQuery;
       hybridBox.onchange = rerunIfQuery;
+      rerankBox.onchange = rerunIfQuery;
       // Debounce slider re-runs so dragging doesn't spam the server.
       let _filterTimer = 0;
       const debouncedRerun = () => {
@@ -1396,6 +1417,7 @@
       };
       limitInput.addEventListener("change", debouncedRerun);
       minScoreInput.addEventListener("change", debouncedRerun);
+      filterInput.addEventListener("change", debouncedRerun);
       input.focus();
     },
 
