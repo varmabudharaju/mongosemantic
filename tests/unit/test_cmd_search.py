@@ -277,6 +277,28 @@ def test_rerank_overfetches_and_applies_reranker_order(monkeypatch):
     assert "row-0" not in r.stdout
 
 
+def test_rerank_runtime_failure_warns_and_truncates(monkeypatch):
+    """Reranker loads but raises at runtime -> degrade to vector order with a
+    warning, exit 0 (parity with the web route's never-500 behavior)."""
+    db = _setup(monkeypatch)
+    fake_provider = MagicMock()
+    fake_provider.embed = lambda q: np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    fake_reranker = MagicMock()
+    fake_reranker.rerank.side_effect = RuntimeError("model exploded")
+    with patch("mongosemantic.commands.search.MongoConnection.open",
+               return_value=_fake_conn(db)), \
+         patch("mongosemantic.commands.search.get_provider", return_value=fake_provider), \
+         patch("mongosemantic.commands.search.get_reranker", return_value=fake_reranker), \
+         patch("mongosemantic.commands.search._run_one", return_value=_fake_rows(5)):
+        r = runner.invoke(app, ["search", "q", "--collection", "articles",
+                                "--limit", "1", "--rerank"])
+    assert r.exit_code == 0, r.output
+    assert "Rerank failed" in r.output
+    assert "model exploded" in r.output
+    assert "row-0" in r.stdout         # vector-ranked results still printed...
+    assert "row-1" not in r.stdout     # ...truncated to --limit
+
+
 def test_rerank_unavailable_warns_and_truncates(monkeypatch):
     db = _setup(monkeypatch)
     fake_provider = MagicMock()

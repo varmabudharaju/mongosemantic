@@ -7,6 +7,7 @@ from mongosemantic.search.filtering import (
     parse_filter,
     prefilter_source_ids,
     prefix_source_filter,
+    validate_filter,
 )
 
 
@@ -77,5 +78,17 @@ def test_prefix_recurses_nor():
 
 def test_parse_filter_rejects_oversize():
     huge = '{"a": "' + "x" * 11_000 + '"}'
-    with pytest.raises(FilterError):
+    with pytest.raises(FilterError, match="too large"):
         parse_filter(huge)
+
+
+def test_validate_filter_rejects_oversize_dict():
+    # MCP tools pass already-parsed dicts straight to validate_filter — the
+    # 10 KB cap must hold on that entry point too, not just parse_filter.
+    huge = {"a": "x" * 11_000}
+    with pytest.raises(FilterError, match="too large"):
+        validate_filter(huge)
+
+
+def test_validate_filter_accepts_normal_dict():
+    assert validate_filter({"year": {"$gte": 1960}}) == {"year": {"$gte": 1960}}

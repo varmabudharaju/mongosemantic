@@ -7,9 +7,11 @@ reuse them from any transport (stdio, SSE, future HTTP, etc.).
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from pymongo.database import Database
+from pymongo.errors import OperationFailure
 
 from mongosemantic.commands.search import _run_one, hybrid_available, run_one_hybrid
 from mongosemantic.db.client import Topology
@@ -33,6 +35,8 @@ from mongosemantic.state import (
     load_config,
 )
 from mongosemantic.web.safe_pipeline import PipelineSafetyError, validate_pipeline
+
+log = logging.getLogger(__name__)
 
 MAX_AGG_DOCS = 100
 MAX_AGG_TIME_MS = 10_000
@@ -193,7 +197,11 @@ def _apply_rerank(query: str, rows: list[dict], limit: int) -> tuple[list[dict],
     reranker = get_reranker()
     if reranker is None:
         return rows[:limit], f"rerank unavailable: {rerank_reason()}"
-    return reranker.rerank(query, rows, limit), None
+    try:
+        return reranker.rerank(query, rows, limit), None
+    except Exception as e:  # degrade to vector order, never fail the tool call
+        log.exception("rerank failed; returning vector-ranked results")
+        return rows[:limit], f"rerank failed: {e}"
 
 
 def t_semantic_search(
@@ -205,6 +213,8 @@ def t_semantic_search(
     filter: dict | None = None,
     rerank: bool = False,
 ) -> dict:
+    if rerank and limit > 1000:
+        raise ValueError("rerank supports limit <= 1000")
     source_filter = _validated_filter(filter)
     cfg = load_config(db, collection)
     if not cfg:
@@ -213,8 +223,17 @@ def t_semantic_search(
     qvec = provider.embed(query).tolist()
     # Rerank is two-stage retrieval: over-fetch candidates, cross-encode, cut.
     fetch_limit = limit * RERANK_CANDIDATE_MULTIPLIER if rerank else limit
-    rows = _run_one(db, cfg, collection, qvec, fetch_limit, topology,
-                    source_filter=source_filter)
+    try:
+        rows = _run_one(db, cfg, collection, qvec, fetch_limit, topology,
+                        source_filter=source_filter)
+    except OperationFailure as e:
+        # Filters pass through to MongoDB verbatim; a runtime rejection
+        # (unknown operator, type mismatch, ...) is user input, not a bug.
+        # Without a filter an OperationFailure is a genuine server error
+        # and keeps propagating.
+        if not source_filter:
+            raise
+        raise ValueError(f"filter rejected by MongoDB: {e}") from e
     notice = None
     if rerank:
         rows, notice = _apply_rerank(query, rows, limit)
@@ -229,7 +248,7 @@ def t_semantic_search(
 
 
 # -----------------------------------------------------------------------------
-# Tool: hybrid_search (Atlas + shadow only)
+# Tool: hybrid_search (shadow mode, any topology)
 # -----------------------------------------------------------------------------
 def t_hybrid_search(
     db: Database,
@@ -240,6 +259,8 @@ def t_hybrid_search(
     filter: dict | None = None,
     rerank: bool = False,
 ) -> dict:
+    if rerank and limit > 1000:
+        raise ValueError("rerank supports limit <= 1000")
     source_filter = _validated_filter(filter)
     cfg = load_config(db, collection)
     if not cfg:
@@ -248,16 +269,23 @@ def t_hybrid_search(
     qvec = provider.embed(query).tolist()
     fetch_limit = limit * RERANK_CANDIDATE_MULTIPLIER if rerank else limit
     notices: list[str] = []
-    if hybrid_available(cfg, topology):
-        mode = "hybrid"
-        rows = run_one_hybrid(db, cfg, collection, query, qvec, fetch_limit,
-                              topology, source_filter=source_filter, hnsw=None)
-    else:
-        # Inline-mode collections have no chunk_text column to keyword-search.
-        mode = "semantic_fallback"
-        rows = _run_one(db, cfg, collection, qvec, fetch_limit, topology,
-                        source_filter=source_filter)
-        notices.append("hybrid requires shadow mode; returned pure semantic results")
+    try:
+        if hybrid_available(cfg, topology):
+            mode = "hybrid"
+            rows = run_one_hybrid(db, cfg, collection, query, qvec, fetch_limit,
+                                  topology, source_filter=source_filter, hnsw=None)
+        else:
+            # Inline-mode collections have no chunk_text column to keyword-search.
+            mode = "semantic_fallback"
+            rows = _run_one(db, cfg, collection, qvec, fetch_limit, topology,
+                            source_filter=source_filter)
+            notices.append("hybrid requires shadow mode; returned pure semantic results")
+    except OperationFailure as e:
+        # Same contract as t_semantic_search: only a supplied filter turns a
+        # runtime OperationFailure into user-input ValueError.
+        if not source_filter:
+            raise
+        raise ValueError(f"filter rejected by MongoDB: {e}") from e
     if rerank:
         rows, rerank_notice = _apply_rerank(query, rows, limit)
         if rerank_notice:
@@ -278,6 +306,8 @@ def t_search_all_collections(
     db: Database, topology: Topology, query: str, limit: int = 10,
     rerank: bool = False,
 ) -> dict:
+    if rerank and limit > 1000:
+        raise ValueError("rerank supports limit <= 1000")
     targets = per_collection_targets(db)
     if not targets:
         return {"query": query, "rows": [], "message": "no collections configured"}

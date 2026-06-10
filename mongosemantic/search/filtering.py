@@ -24,14 +24,19 @@ class FilterError(ValueError):
 
 
 def validate_filter(flt: dict[str, Any]) -> dict[str, Any]:
-    """Reject forbidden operators in an already-parsed filter document."""
+    """Reject oversize or forbidden-operator filter documents.
+
+    Single source of truth for filter guards — both entry points
+    (parse_filter for raw JSON strings, MCP tools for already-parsed
+    dicts) funnel through here.
+    """
+    if len(json.dumps(flt, default=str)) > _MAX_FILTER_BYTES:
+        raise FilterError("filter too large (max 10 KB)")
     _reject_forbidden(flt)
     return flt
 
 
 def parse_filter(raw: str) -> dict[str, Any]:
-    if len(raw) > _MAX_FILTER_BYTES:
-        raise FilterError("filter too large (max 10 KB)")
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError as e:

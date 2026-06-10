@@ -69,7 +69,8 @@ def build_inline_atlas_pipeline(
     emb_path = inline_embedding_path(field_path)
     text_path = inline_text_path(field_path)
     fetch_limit = limit * oversample if source_filter else limit
-    num_candidates = max(10 * fetch_limit, 100)
+    # Atlas rejects numCandidates > 10k
+    num_candidates = min(max(10 * fetch_limit, 100), 10_000)
     vector_search: dict[str, Any] = {
         "index": index_name,
         "path": emb_path,

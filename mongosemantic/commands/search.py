@@ -281,7 +281,14 @@ def search_cmd(
                 # One rerank over the merged rows: cross-encoder scores are
                 # comparable across embedding models, which incidentally fixes
                 # mixed-model ordering too.
-                rows = reranker.rerank(query, rows, limit)
+                try:
+                    rows = reranker.rerank(query, rows, limit)
+                except Exception as e:  # degrade to vector order, never crash
+                    console.print(
+                        f"[yellow]Rerank failed ({e}); "
+                        "returning vector-ranked results.[/yellow]"
+                    )
+                    rows = rows[:limit]
 
         table = Table(title=f'Search: "{query}"')
         table.add_column("Score", justify="right")

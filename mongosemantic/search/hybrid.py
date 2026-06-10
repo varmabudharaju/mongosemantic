@@ -51,7 +51,8 @@ def build_hybrid_pipeline(
         raise ValueError("hybrid weights must be positive")
 
     fetch_limit = limit * oversample if source_filter else limit
-    num_candidates = max(10 * fetch_limit, 100)
+    # Atlas rejects numCandidates > 10k
+    num_candidates = min(max(10 * fetch_limit, 100), 10_000)
 
     vector_sub = [
         {

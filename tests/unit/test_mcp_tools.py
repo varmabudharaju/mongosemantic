@@ -190,6 +190,71 @@ def test_semantic_search_rejects_invalid_filter():
                             filter={"$where": "1"})
 
 
+def test_semantic_search_filter_runtime_rejection_raises_value_error():
+    """A filter that validates client-side but is rejected by MongoDB at
+    runtime is user input — surface it as ValueError, not OperationFailure."""
+    from pymongo.errors import OperationFailure
+
+    db = _db()
+    _shadow_cfg(db)
+    fake_provider = MagicMock()
+    fake_provider.embed = lambda q: np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    with patch("mongosemantic.mcp_server.tools.get_provider", return_value=fake_provider), \
+         patch("mongosemantic.mcp_server.tools._run_one",
+               side_effect=OperationFailure("unknown operator $regexx")), \
+         pytest.raises(ValueError, match="filter rejected by MongoDB"):
+        t.t_semantic_search(db, Topology.STANDALONE, "q", "articles",
+                            filter={"plot": {"$gte": 1}})
+
+
+def test_semantic_search_operation_failure_without_filter_propagates():
+    """No filter -> an OperationFailure is a genuine server error and must
+    NOT be rebranded as a filter problem."""
+    from pymongo.errors import OperationFailure
+
+    db = _db()
+    _shadow_cfg(db)
+    fake_provider = MagicMock()
+    fake_provider.embed = lambda q: np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    with patch("mongosemantic.mcp_server.tools.get_provider", return_value=fake_provider), \
+         patch("mongosemantic.mcp_server.tools._run_one",
+               side_effect=OperationFailure("server exploded")), \
+         pytest.raises(OperationFailure, match="server exploded"):
+        t.t_semantic_search(db, Topology.STANDALONE, "q", "articles")
+
+
+def test_semantic_search_rerank_failure_degrades_with_notice():
+    """Reranker loads but raises at runtime -> vector-ranked rows, truncated,
+    with an explanatory notice (parity with the web route)."""
+    db = _db()
+    _shadow_cfg(db)
+    fake_provider = MagicMock()
+    fake_provider.embed = lambda q: np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    fetched = [
+        {"source_id": str(i), "source_collection": "articles", "field_path": "body",
+         "chunk_text": f"t{i}", "score": 1.0 - i / 10}
+        for i in range(5)
+    ]
+    fake_reranker = MagicMock()
+    fake_reranker.rerank.side_effect = RuntimeError("model exploded")
+    with patch("mongosemantic.mcp_server.tools.get_provider", return_value=fake_provider), \
+         patch("mongosemantic.mcp_server.tools._run_one", return_value=fetched), \
+         patch("mongosemantic.mcp_server.tools.get_reranker", return_value=fake_reranker):
+        out = t.t_semantic_search(db, Topology.STANDALONE, "q", "articles",
+                                  limit=2, rerank=True)
+    assert out["notice"] == "rerank failed: model exploded"
+    assert len(out["rows"]) == 2
+    assert [r["source_id"] for r in out["rows"]] == ["0", "1"]  # vector order
+
+
+def test_semantic_search_rerank_limit_capped_at_1000():
+    db = _db()
+    _shadow_cfg(db)
+    with pytest.raises(ValueError, match="rerank supports limit <= 1000"):
+        t.t_semantic_search(db, Topology.STANDALONE, "q", "articles",
+                            limit=1001, rerank=True)
+
+
 def test_semantic_search_rerank_unavailable_adds_notice_and_truncates():
     db = _db()
     _shadow_cfg(db)
@@ -352,6 +417,50 @@ def test_hybrid_search_rejects_invalid_filter():
     with pytest.raises(ValueError, match="invalid filter"):
         t.t_hybrid_search(db, Topology.STANDALONE, "q", "articles",
                           filter={"a": {"$expr": {"$gt": [1, 0]}}})
+
+
+def test_hybrid_search_filter_runtime_rejection_raises_value_error():
+    from pymongo.errors import OperationFailure
+
+    db = _db()
+    _shadow_cfg(db)
+    fake_provider = MagicMock()
+    fake_provider.embed = lambda q: np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    with patch("mongosemantic.mcp_server.tools.get_provider", return_value=fake_provider), \
+         patch("mongosemantic.mcp_server.tools.run_one_hybrid",
+               side_effect=OperationFailure("unknown operator $regexx")), \
+         pytest.raises(ValueError, match="filter rejected by MongoDB"):
+        t.t_hybrid_search(db, Topology.STANDALONE, "q", "articles",
+                          filter={"plot": {"$gte": 1}})
+
+
+def test_hybrid_search_operation_failure_without_filter_propagates():
+    from pymongo.errors import OperationFailure
+
+    db = _db()
+    _shadow_cfg(db)
+    fake_provider = MagicMock()
+    fake_provider.embed = lambda q: np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    with patch("mongosemantic.mcp_server.tools.get_provider", return_value=fake_provider), \
+         patch("mongosemantic.mcp_server.tools.run_one_hybrid",
+               side_effect=OperationFailure("server exploded")), \
+         pytest.raises(OperationFailure, match="server exploded"):
+        t.t_hybrid_search(db, Topology.STANDALONE, "q", "articles")
+
+
+def test_hybrid_search_rerank_limit_capped_at_1000():
+    db = _db()
+    _shadow_cfg(db)
+    with pytest.raises(ValueError, match="rerank supports limit <= 1000"):
+        t.t_hybrid_search(db, Topology.STANDALONE, "q", "articles",
+                          limit=1001, rerank=True)
+
+
+def test_search_all_collections_rerank_limit_capped_at_1000():
+    db = _db()
+    with pytest.raises(ValueError, match="rerank supports limit <= 1000"):
+        t.t_search_all_collections(db, Topology.STANDALONE, "q",
+                                   limit=1001, rerank=True)
 
 
 # -- safe_aggregation --------------------------------------------------------
