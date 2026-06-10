@@ -15,6 +15,7 @@ from mongosemantic.db.indexes import (
     suggested_atlas_command,
 )
 from mongosemantic.db.queries import inline_embedding_path
+from mongosemantic.search.local_hybrid import ensure_text_index
 from mongosemantic.state import (
     CollectionConfig,
     FieldSpec,
@@ -69,6 +70,7 @@ def apply(name: str = Path(...), req: ApplyRequest = ...) -> dict:
         if req.mode == "shadow":
             shadow_name = shadow_collection_name(name)
             ensure_shadow_indexes(db[shadow_name])
+            ensure_text_index(db[shadow_name])
         else:
             shadow_name = None
         cfg = CollectionConfig(

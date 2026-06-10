@@ -170,3 +170,42 @@ def test_apply_rejects_chunk_with_inline(monkeypatch):
         assert "chunk" in r.output.lower() and "shadow" in r.output.lower()
     from mongosemantic.state import load_config
     assert load_config(fake_db, "articles") is None
+
+
+def test_apply_shadow_creates_text_index(monkeypatch):
+    """Shadow-mode apply must eagerly create the msem_chunk_text_text $text index
+    on the shadow collection so the first hybrid search doesn't pay the build cost."""
+    _patch_env(monkeypatch)
+    fake_db = mongomock.MongoClient()["d"]
+    fake_conn = MagicMock()
+    fake_conn.db = fake_db
+    from mongosemantic.db.client import Topology
+    fake_conn.topology = Topology.STANDALONE
+    with patch("mongosemantic.commands.apply.MongoConnection.open", return_value=fake_conn):
+        r = runner.invoke(app, ["apply", "--collection", "articles", "--field", "body"])
+        assert r.exit_code == 0, r.output
+    shadow = fake_db["articles_embeddings"]
+    assert "msem_chunk_text_text" in shadow.index_information(), (
+        "expected msem_chunk_text_text text index on shadow collection after apply"
+    )
+
+
+def test_apply_inline_does_not_create_text_index(monkeypatch):
+    """Inline-mode apply must NOT create the text index (no shadow collection exists)."""
+    _patch_env(monkeypatch)
+    fake_db = mongomock.MongoClient()["d"]
+    fake_conn = MagicMock()
+    fake_conn.db = fake_db
+    from mongosemantic.db.client import Topology
+    fake_conn.topology = Topology.STANDALONE
+    with patch("mongosemantic.commands.apply.MongoConnection.open", return_value=fake_conn):
+        r = runner.invoke(
+            app,
+            ["apply", "--collection", "articles", "--field", "body", "--mode", "inline"],
+        )
+        assert r.exit_code == 0, r.output
+    # The text index should not appear on the source collection
+    source_indexes = fake_db["articles"].index_information()
+    assert "msem_chunk_text_text" not in source_indexes, (
+        "inline-mode apply must not create msem_chunk_text_text on the source collection"
+    )

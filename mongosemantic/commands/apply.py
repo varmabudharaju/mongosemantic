@@ -17,6 +17,7 @@ from mongosemantic.db.indexes import (
 )
 from mongosemantic.db.queries import inline_embedding_path
 from mongosemantic.search.hybrid import search_index_name
+from mongosemantic.search.local_hybrid import ensure_text_index
 from mongosemantic.state import (
     CollectionConfig,
     FieldSpec,
@@ -66,6 +67,7 @@ def apply_cmd(
         if mode == "shadow":
             shadow_name = shadow_collection_name(collection)
             ensure_shadow_indexes(db[shadow_name])
+            ensure_text_index(db[shadow_name])
             cfg = CollectionConfig(
                 collection=collection,
                 mode="shadow",

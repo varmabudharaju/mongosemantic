@@ -101,3 +101,23 @@ def test_apply_rejects_unknown_model(monkeypatch):
             headers={CSRF_HEADER: token},
         )
         assert r.status_code == 400
+
+
+def test_apply_shadow_creates_text_index_via_route(monkeypatch):
+    """Web route shadow-mode apply must eagerly create the msem_chunk_text_text
+    $text index on the shadow collection."""
+    client, db = _client_db(monkeypatch)
+    seed = client.get("/healthz")
+    token = seed.cookies.get("csrftoken")
+    with patch("mongosemantic.web.routes.apply.MongoConnection.open", return_value=_conn(db)):
+        r = client.post(
+            "/api/collections/articles/apply",
+            json={"fields": ["body"], "mode": "shadow", "chunked": False,
+                  "model": "local-fast"},
+            headers={CSRF_HEADER: token},
+        )
+        assert r.status_code == 200, r.text
+    shadow = db["articles_embeddings"]
+    assert "msem_chunk_text_text" in shadow.index_information(), (
+        "expected msem_chunk_text_text text index on shadow collection after web apply"
+    )
