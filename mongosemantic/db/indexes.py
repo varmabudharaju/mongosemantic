@@ -5,6 +5,7 @@ from typing import Any
 
 from pymongo import ASCENDING
 from pymongo.collection import Collection
+from pymongo.errors import OperationFailure
 
 
 def shadow_collection_name(source: str) -> str:
@@ -136,4 +137,12 @@ def create_atlas_search_index(
 
 
 def atlas_search_index_exists(target: Collection, name: str) -> bool:
-    return any(idx.get("name") == name for idx in target.list_search_indexes())
+    """True if an Atlas Search (BM25) index with this exact name exists.
+
+    Catches OperationFailure so non-Atlas deployments (where
+    $listSearchIndexes is unsupported) read as "no index" instead of crashing.
+    """
+    try:
+        return any(idx.get("name") == name for idx in target.list_search_indexes())
+    except OperationFailure:
+        return False

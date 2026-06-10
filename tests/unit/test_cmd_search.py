@@ -6,7 +6,7 @@ import numpy as np
 from typer.testing import CliRunner
 
 from mongosemantic.cli import app
-from mongosemantic.commands.search import _run_one
+from mongosemantic.commands.search import _run_one, hybrid_available, run_one_hybrid
 from mongosemantic.db.client import Topology
 from mongosemantic.state.config_store import CollectionConfig, FieldSpec, save_config
 
@@ -82,7 +82,7 @@ def test_run_one_searches_every_configured_field():
     save_config(db, cfg)
     calls: list[str] = []
 
-    def fake_field(_db, _cfg, _coll, field_path, _q, _limit, _topo):
+    def fake_field(_db, _cfg, _coll, field_path, _q, _limit, _topo, source_filter=None):
         calls.append(field_path)
         return [{"source_id": f"id-{field_path}", "field_path": field_path,
                  "chunk_text": f"hit-{field_path}", "score": 0.5}]
@@ -160,7 +160,7 @@ def test_run_one_merges_and_top_k_across_fields():
                   {"source_id": "d", "field_path": "body",  "chunk_text": "b-d", "score": 0.3}],
     }
 
-    def fake_field(_db, _cfg, _coll, field_path, _q, _limit, _topo):
+    def fake_field(_db, _cfg, _coll, field_path, _q, _limit, _topo, source_filter=None):
         return per_field[field_path]
 
     with patch("mongosemantic.commands.search._run_one_field", side_effect=fake_field):
@@ -168,3 +168,135 @@ def test_run_one_merges_and_top_k_across_fields():
 
     assert [r["score"] for r in rows] == [0.9, 0.8, 0.4]
     assert [r["source_id"] for r in rows] == ["a", "c", "b"]
+
+
+# --- --filter ---------------------------------------------------------------
+
+def _fake_conn(db, topology=Topology.STANDALONE):
+    conn = MagicMock()
+    conn.db = db
+    conn.topology = topology
+    return conn
+
+
+def test_filter_option_plumbs_parsed_dict_into_run_one(monkeypatch):
+    db = _setup(monkeypatch)
+    fake_provider = MagicMock()
+    fake_provider.embed = lambda q: np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    with patch("mongosemantic.commands.search.MongoConnection.open",
+               return_value=_fake_conn(db)), \
+         patch("mongosemantic.commands.search.get_provider", return_value=fake_provider), \
+         patch("mongosemantic.commands.search._run_one", return_value=[]) as run:
+        r = runner.invoke(app, ["search", "q", "--collection", "articles",
+                                "--filter", '{"year": {"$gte": 1960}}'])
+        assert r.exit_code == 0, r.output
+        run.assert_called_once()
+        assert run.call_args.kwargs["source_filter"] == {"year": {"$gte": 1960}}
+
+
+def test_invalid_filter_json_exits_2(monkeypatch):
+    db = _setup(monkeypatch)
+    with patch("mongosemantic.commands.search.MongoConnection.open",
+               return_value=_fake_conn(db)):
+        r = runner.invoke(app, ["search", "q", "--collection", "articles",
+                                "--filter", "{not json"])
+    assert r.exit_code == 2
+    assert "filter" in r.output.lower()
+    assert "json" in r.output.lower()  # FilterError message, not typer usage error
+
+
+# --- --rerank ---------------------------------------------------------------
+
+def _fake_rows(n):
+    return [
+        {"source_id": f"id-{i}", "source_collection": "articles", "field_path": "body",
+         "chunk_index": 0, "chunk_text": f"row-{i}", "score": round(1.0 - i / 100, 3)}
+        for i in range(n)
+    ]
+
+
+def test_rerank_overfetches_and_applies_reranker_order(monkeypatch):
+    db = _setup(monkeypatch)
+    fake_provider = MagicMock()
+    fake_provider.embed = lambda q: np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    fake_reranker = MagicMock()
+    fake_reranker.rerank = lambda q, rows, limit: list(reversed(rows))[:limit]
+    with patch("mongosemantic.commands.search.MongoConnection.open",
+               return_value=_fake_conn(db)), \
+         patch("mongosemantic.commands.search.get_provider", return_value=fake_provider), \
+         patch("mongosemantic.commands.search.get_reranker", return_value=fake_reranker), \
+         patch("mongosemantic.commands.search._run_one", return_value=_fake_rows(10)) as run:
+        r = runner.invoke(app, ["search", "q", "--collection", "articles",
+                                "--limit", "2", "--rerank"])
+        assert r.exit_code == 0, r.output
+        # Over-fetch: limit * RERANK_CANDIDATE_MULTIPLIER (2 * 5) candidates.
+        assert run.call_args.args[4] == 10
+    # Fake reranker reversed the rows: last two candidates win.
+    assert "row-9" in r.stdout
+    assert "row-8" in r.stdout
+    assert "row-0" not in r.stdout
+
+
+def test_rerank_unavailable_warns_and_truncates(monkeypatch):
+    db = _setup(monkeypatch)
+    fake_provider = MagicMock()
+    fake_provider.embed = lambda q: np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    with patch("mongosemantic.commands.search.MongoConnection.open",
+               return_value=_fake_conn(db)), \
+         patch("mongosemantic.commands.search.get_provider", return_value=fake_provider), \
+         patch("mongosemantic.commands.search.get_reranker", return_value=None), \
+         patch("mongosemantic.commands.search.rerank_reason", return_value="nope"), \
+         patch("mongosemantic.commands.search._run_one", return_value=_fake_rows(5)):
+        r = runner.invoke(app, ["search", "q", "--collection", "articles",
+                                "--limit", "1", "--rerank"])
+    assert r.exit_code == 0, r.output
+    assert "nope" in r.output          # warning includes rerank_reason()
+    assert "row-0" in r.stdout         # results still printed...
+    assert "row-1" not in r.stdout     # ...truncated to --limit
+
+
+# --- hybrid on every topology -------------------------------------------------
+
+def test_hybrid_available_shadow_any_topology_inline_never():
+    shadow_cfg = _multi_field_cfg()
+    assert hybrid_available(shadow_cfg, Topology.STANDALONE) is True
+    inline_cfg = CollectionConfig(
+        collection="products", mode="inline", shadow_collection=None,
+        fields=[FieldSpec(path="description")], embedding_model="local-fast",
+        embedding_dim=3,
+        created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc),
+    )
+    assert hybrid_available(inline_cfg, Topology.ATLAS) is False
+
+
+def test_run_one_hybrid_standalone_uses_client_side_rrf():
+    """Non-Atlas hybrid fuses the vector leg + $text leg with RRF client-side."""
+    db = mongomock.MongoClient()["d"]
+    cfg = CollectionConfig(
+        collection="articles", mode="shadow", shadow_collection="articles_embeddings",
+        fields=[FieldSpec(path="body")], embedding_model="local-fast", embedding_dim=3,
+        created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc),
+    )
+    save_config(db, cfg)
+
+    def row(sid, score):
+        return {"source_id": sid, "field_path": "body", "chunk_index": 0,
+                "chunk_text": f"text-{sid}", "score": score}
+
+    vec_rows = [row("a", 0.9), row("b", 0.8)]
+    txt_rows = [row("b", 5.0), row("c", 3.0)]
+
+    with patch("mongosemantic.commands.search._run_one_field",
+               return_value=vec_rows) as vec, \
+         patch("mongosemantic.commands.search.text_leg",
+               return_value=txt_rows) as txt:
+        rows = run_one_hybrid(db, cfg, "articles", "q", [0.0, 0.0, 0.0],
+                              limit=10, topology=Topology.STANDALONE)
+        vec.assert_called_once()
+        txt.assert_called_once()
+
+    # RRF: "b" appears in both legs (rank 2 vector, rank 1 text) and must
+    # outrank "a" (rank-1 vector only). All three docs survive the fuse.
+    assert [r["source_id"] for r in rows][0] == "b"
+    assert {r["source_id"] for r in rows} == {"a", "b", "c"}
+    assert all(r["source_collection"] == "articles" for r in rows)

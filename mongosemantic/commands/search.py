@@ -6,14 +6,25 @@ from rich.table import Table
 
 from mongosemantic.config import Settings
 from mongosemantic.db.client import MongoConnection, Topology
-from mongosemantic.db.indexes import atlas_vector_index_exists, vector_index_name
+from mongosemantic.db.indexes import (
+    atlas_search_index_exists,
+    atlas_vector_index_exists,
+    vector_index_name,
+)
 from mongosemantic.embeddings.provider import get_provider
 from mongosemantic.exceptions import NotConfiguredError
 from mongosemantic.search.atlas import build_atlas_pipeline
 from mongosemantic.search.brute_force import build_brute_pipeline
 from mongosemantic.search.cross_collection import min_max_normalize, per_collection_targets
+from mongosemantic.search.filtering import FilterError, parse_filter, prefilter_source_ids
 from mongosemantic.search.hybrid import build_hybrid_pipeline, search_index_name
 from mongosemantic.search.inline import build_inline_atlas_pipeline, build_inline_brute_pipeline
+from mongosemantic.search.local_hybrid import HYBRID_WEIGHTS, rrf_fuse, text_leg
+from mongosemantic.search.rerank import (
+    RERANK_CANDIDATE_MULTIPLIER,
+    get_reranker,
+    rerank_reason,
+)
 from mongosemantic.state import load_config
 
 console = Console()
@@ -28,6 +39,7 @@ def _resolved_vector_index_name(cfg, field_path: str) -> str:
 def _run_one_field(
     db, cfg, collection: str, field_path: str, query_vec: list[float],
     limit: int, topology: Topology,
+    source_filter: dict | None = None,
 ):
     idx_name = _resolved_vector_index_name(cfg, field_path)
     if cfg.mode == "inline":
@@ -38,12 +50,16 @@ def _run_one_field(
                 query_vector=query_vec,
                 limit=limit,
                 index_name=idx_name,
+                source_filter=source_filter,
             )
         else:
+            # Inline brute force runs directly on the source docs, so the
+            # user filter applies as-is in the $match.
             pipeline = build_inline_brute_pipeline(
                 field_path=field_path,
                 query_vector=query_vec,
                 limit=limit,
+                filter_match=source_filter,
             )
     else:
         target = db[cfg.shadow_collection]
@@ -54,13 +70,21 @@ def _run_one_field(
                 query_vector=query_vec,
                 limit=limit,
                 index_name=idx_name,
+                source_filter=source_filter,
             )
         else:
+            # Shadow chunks carry no source metadata — pre-resolve the
+            # matching source _ids and constrain the scan to them.
+            filter_match = None
+            if source_filter:
+                ids = prefilter_source_ids(db, collection, source_filter)
+                filter_match = {"source_id": {"$in": ids}}
             pipeline = build_brute_pipeline(
                 source_collection=collection,
                 field_path=field_path,
                 query_vector=query_vec,
                 limit=limit,
+                filter_match=filter_match,
             )
     rows = list(target.aggregate(pipeline))
     for r in rows:
@@ -68,49 +92,80 @@ def _run_one_field(
     return rows
 
 
-def _run_one(db, cfg, collection: str, query_vec: list[float], limit: int, topology: Topology):
+def _run_one(db, cfg, collection: str, query_vec: list[float], limit: int,
+             topology: Topology, source_filter: dict | None = None):
     merged: list[dict] = []
     for spec in cfg.fields:
         merged.extend(
-            _run_one_field(db, cfg, collection, spec.path, query_vec, limit, topology)
+            _run_one_field(db, cfg, collection, spec.path, query_vec, limit,
+                           topology, source_filter=source_filter)
         )
     merged.sort(key=lambda r: r.get("score", 0.0), reverse=True)
     return merged[:limit]
 
 
 def hybrid_available(cfg, topology: Topology) -> bool:
-    """Hybrid requires Atlas + shadow mode (we need a chunk_text column to index)."""
-    return topology == Topology.ATLAS and cfg.mode == "shadow"
+    """Hybrid needs a chunk_text column to keyword-search -> shadow mode, any topology."""
+    return cfg.mode == "shadow"
+
+
+def _atlas_native_hybrid_ready(db, cfg, collection: str, field_path: str) -> bool:
+    """True when both Atlas indexes ($vectorSearch + $search) exist on the shadow,
+    i.e. the server-side $rankFusion path can actually answer."""
+    shadow = db[cfg.shadow_collection]
+    stored_search = (cfg.search_index_names or {}).get(field_path)
+    sname = stored_search or search_index_name(collection, field_path)
+    return atlas_vector_index_exists(shadow, collection, field_path) and \
+        atlas_search_index_exists(shadow, sname)
 
 
 def _run_hybrid_field(
     db, cfg, collection: str, field_path: str, query_text: str,
-    query_vec: list[float], limit: int,
+    query_vec: list[float], limit: int, topology: Topology,
+    source_filter: dict | None = None, hnsw=None,
 ):
-    shadow = db[cfg.shadow_collection]
-    stored_search = (cfg.search_index_names or {}).get(field_path)
-    pipeline = build_hybrid_pipeline(
-        source_collection=collection,
-        field_path=field_path,
-        query_text=query_text,
-        query_vector=query_vec,
-        limit=limit,
-        vector_index_name=_resolved_vector_index_name(cfg, field_path),
-        search_index_name=stored_search or search_index_name(collection, field_path),
-    )
-    rows = list(shadow.aggregate(pipeline))
+    if topology == Topology.ATLAS and _atlas_native_hybrid_ready(db, cfg, collection, field_path):
+        shadow = db[cfg.shadow_collection]
+        stored_search = (cfg.search_index_names or {}).get(field_path)
+        pipeline = build_hybrid_pipeline(
+            source_collection=collection,
+            field_path=field_path,
+            query_text=query_text,
+            query_vector=query_vec,
+            limit=limit,
+            vector_index_name=_resolved_vector_index_name(cfg, field_path),
+            search_index_name=stored_search or search_index_name(collection, field_path),
+            source_filter=source_filter,
+        )
+        rows = list(shadow.aggregate(pipeline))
+    else:
+        # Client-side RRF: vector leg (HNSW when loaded, exact otherwise)
+        # fused with a classic $text keyword leg. Works on any topology,
+        # including Atlas clusters whose Search indexes are cap-blocked.
+        allowed = prefilter_source_ids(db, collection, source_filter) if source_filter else None
+        vec_rows = None
+        if hnsw is not None:
+            vec_rows = hnsw.query(db, cfg, field_path, query_vec, limit, allowed_ids=allowed)
+        if vec_rows is None:
+            vec_rows = _run_one_field(db, cfg, collection, field_path, query_vec,
+                                      limit, topology, source_filter=source_filter)
+        txt_rows = text_leg(db, cfg, collection, field_path, query_text, limit,
+                            allowed_ids=allowed)
+        rows = rrf_fuse([vec_rows, txt_rows], weights=HYBRID_WEIGHTS, limit=limit)
     for r in rows:
         r["source_collection"] = collection
     return rows
 
 
 def run_one_hybrid(db, cfg, collection: str, query_text: str,
-                   query_vec: list[float], limit: int, topology: Topology):
+                   query_vec: list[float], limit: int, topology: Topology,
+                   source_filter: dict | None = None, hnsw=None):
     """Hybrid version of `_run_one` — fans out across every field, merges, top-k."""
     merged: list[dict] = []
     for spec in cfg.fields:
         merged.extend(
-            _run_hybrid_field(db, cfg, collection, spec.path, query_text, query_vec, limit)
+            _run_hybrid_field(db, cfg, collection, spec.path, query_text, query_vec,
+                              limit, topology, source_filter=source_filter, hnsw=hnsw)
         )
     merged.sort(key=lambda r: r.get("score", 0.0), reverse=True)
     return merged[:limit]
@@ -120,9 +175,22 @@ def search_cmd(
     collection: str | None = typer.Option(None, "--collection", "-c"),
     limit: int = typer.Option(10, "--limit"),
     hybrid: bool = typer.Option(False, "--hybrid",
-        help="Combine semantic + keyword search (Atlas + shadow mode only)."),
+        help="Combine semantic + keyword search (shadow mode; any topology)."),
+    filter_json: str | None = typer.Option(
+        None, "--filter",
+        help='MongoDB filter on source documents, e.g. \'{"year": {"$gte": 1960}}\'.'),
+    rerank: bool = typer.Option(
+        False, "--rerank",
+        help="Re-score results with a local cross-encoder (better precision, slower)."),
 ) -> None:
     """Search by meaning. Omit --collection to search all configured collections."""
+    try:
+        source_filter = parse_filter(filter_json) if filter_json else None
+    except FilterError as e:
+        console.print(f"[red]Invalid --filter: {e}[/red]")
+        raise typer.Exit(code=2) from e
+    # Rerank is two-stage retrieval: over-fetch candidates, cross-encode, cut.
+    fetch_limit = limit * RERANK_CANDIDATE_MULTIPLIER if rerank else limit
     settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
@@ -140,8 +208,10 @@ def search_cmd(
         def _run(cfg, name):
             qv = _qvec(cfg.embedding_model)
             if hybrid and hybrid_available(cfg, conn.topology):
-                return run_one_hybrid(db, cfg, name, query, qv, limit, conn.topology)
-            return _run_one(db, cfg, name, qv, limit, conn.topology)
+                return run_one_hybrid(db, cfg, name, query, qv, fetch_limit,
+                                      conn.topology, source_filter=source_filter)
+            return _run_one(db, cfg, name, qv, fetch_limit, conn.topology,
+                            source_filter=source_filter)
 
         if collection:
             cfg = load_config(db, collection)
@@ -149,11 +219,13 @@ def search_cmd(
                 raise NotConfiguredError(f"{collection} not configured")
             if hybrid and not hybrid_available(cfg, conn.topology):
                 console.print(
-                    "[yellow]Hybrid search requires Atlas + shadow-mode collections. "
+                    "[yellow]Hybrid search requires shadow-mode collections "
+                    "(inline mode has no chunk_text column to keyword-search). "
                     "Falling back to pure semantic.[/yellow]"
                 )
             rows = _run(cfg, collection)
-            if hybrid and not rows and hybrid_available(cfg, conn.topology):
+            if (hybrid and not rows and hybrid_available(cfg, conn.topology)
+                    and conn.topology == Topology.ATLAS):
                 console.print(
                     "[yellow]Hybrid returned no rows. Both Atlas indexes (vectorSearch "
                     "+ search) must exist and be queryable — they build for ~30–90 s "
@@ -176,7 +248,21 @@ def search_cmd(
             if len(set(models_per_collection.values())) > 1:
                 all_rows = min_max_normalize(all_rows, "score")
             all_rows.sort(key=lambda r: r.get("score", 0.0), reverse=True)
-            rows = all_rows[:limit]
+            rows = all_rows[:fetch_limit]
+
+        if rerank:
+            reranker = get_reranker()
+            if reranker is None:
+                console.print(
+                    f"[yellow]Rerank model unavailable ({rerank_reason()}); "
+                    "returning vector-ranked results.[/yellow]"
+                )
+                rows = rows[:limit]
+            else:
+                # One rerank over the merged rows: cross-encoder scores are
+                # comparable across embedding models, which incidentally fixes
+                # mixed-model ordering too.
+                rows = reranker.rerank(query, rows, limit)
 
         table = Table(title=f'Search: "{query}"')
         table.add_column("Score", justify="right")

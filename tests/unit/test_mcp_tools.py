@@ -175,19 +175,21 @@ def test_search_all_collections_merges_across_configs():
 
 # -- hybrid_search ---------------------------------------------------------
 
-def test_hybrid_search_falls_back_to_semantic_on_self_hosted():
-    """Replica-set / standalone don't have $rankFusion — falls back to vector
-    only, but reports it in `notice` so callers know the result is degraded."""
+def test_hybrid_search_runs_hybrid_on_self_hosted_shadow():
+    """Replica-set / standalone don't have $rankFusion, but shadow-mode hybrid
+    now runs everywhere via client-side RRF ($text leg + vector leg)."""
     db = _db()
     _shadow_cfg(db)
     fake_provider = MagicMock()
     fake_provider.embed = lambda q: np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    fake_rows = [{"source_id": "a", "source_collection": "articles",
+                  "field_path": "body", "chunk_text": "t", "score": 0.9}]
     with patch("mongosemantic.mcp_server.tools.get_provider", return_value=fake_provider), \
-         patch("mongosemantic.mcp_server.tools._run_one", return_value=[]) as semantic:
+         patch("mongosemantic.mcp_server.tools.run_one_hybrid", return_value=fake_rows) as hyb:
         out = t.t_hybrid_search(db, Topology.REPLICA_SET, "q", "articles")
-        semantic.assert_called_once()
-    assert out["mode"] == "semantic_fallback"
-    assert "hybrid requires Atlas" in out["notice"]
+        hyb.assert_called_once()
+    assert out["mode"] == "hybrid"
+    assert out["notice"] is None
 
 
 def test_hybrid_search_uses_hybrid_path_on_atlas_shadow():
