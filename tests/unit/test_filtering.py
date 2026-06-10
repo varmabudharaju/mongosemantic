@@ -60,3 +60,22 @@ def test_prefilter_source_ids():
     )
     ids = prefilter_source_ids(db, "movies", {"year": {"$gte": 1960}})
     assert sorted(ids) == [2, 3]
+
+
+def test_prefix_keeps_value_level_not_operator():
+    # $not lives under a field key, so only the field key gets prefixed.
+    assert prefix_source_filter({"year": {"$not": {"$gt": 1990}}}) == {
+        "source_doc.year": {"$not": {"$gt": 1990}}
+    }
+
+
+def test_prefix_recurses_nor():
+    assert prefix_source_filter({"$nor": [{"year": 1960}]}) == {
+        "$nor": [{"source_doc.year": 1960}]
+    }
+
+
+def test_parse_filter_rejects_oversize():
+    huge = '{"a": "' + "x" * 11_000 + '"}'
+    with pytest.raises(FilterError):
+        parse_filter(huge)

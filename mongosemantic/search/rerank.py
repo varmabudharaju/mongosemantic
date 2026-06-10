@@ -76,7 +76,8 @@ def get_reranker() -> Reranker | None:
 
 
 def rerank_reason() -> str:
-    return _failed or "unknown error"
+    """Why get_reranker() returned None (only meaningful after it has)."""
+    return _failed or "rerank model not loaded"
 
 
 def reset_for_tests() -> None:

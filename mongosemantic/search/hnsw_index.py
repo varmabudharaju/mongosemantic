@@ -104,7 +104,8 @@ class HnswIndexManager:
         allowed_ids: list | None = None,
     ) -> list[dict] | None:
         """Return top-k rows from the HNSW index, or None if no index
-        is loaded for this (collection, field, model).
+        is loaded for this (collection, field, model) or the query itself
+        fails (callers treat None as "fall back to exact brute force").
 
         If *allowed_ids* is given (not None), only chunks whose source_id
         appears in that list are eligible.  An empty list returns [] immediately.
@@ -138,9 +139,10 @@ class HnswIndexManager:
 
             try:
                 ids, distances = loaded.index.knn_query(qv, k=k, filter=filter_fn)
-            except RuntimeError:
+            except RuntimeError as e:
                 # hnswlib can fail to fill k results under a tight filter; signal
                 # "no HNSW answer" so the caller falls back to exact brute force.
+                log.warning("HNSW knn_query failed for %s (%s); falling back to brute", key, e)
                 return None
         except Exception:
             log.exception("HNSW query failed for %s; falling back to brute", key)
