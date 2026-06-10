@@ -85,21 +85,59 @@ for rollback — drop it with `--drop-archive` (or manually) once verified.
 Available as the `migrate_model` MCP tool too. Shadow-mode only;
 inline-mode collections are rejected with a clear error.
 
-## Hybrid search (Atlas)
+## Filtering and reranking
 
-Combine semantic similarity with BM25 keyword matching, fused via Atlas
-`$rankFusion`. Useful when a query mixes meaning and specific terms — e.g.
-*"MongoDB 7.0 replica set issues"* benefits from semantic (catches
-"replica set" → "replication") plus keyword (anchors on "7.0").
+Narrow any semantic search with a plain MongoDB query over the source
+documents — works on every search path, no reindex needed:
+
+```bash
+mongosemantic search "noir thrillers" -c movies --filter '{"year": {"$gte": 1960}}'
+```
+
+Re-score the top candidates with a local cross-encoder
+(`cross-encoder/ms-marco-MiniLM-L-6-v2`, ~80 MB, CPU, loaded once per
+process) for noticeably better ordering — over-fetches limit×5 candidates,
+re-scores, returns the top limit, keeping the original score as
+`vector_score`:
+
+```bash
+mongosemantic search "noir thrillers" -c movies --rerank
+```
+
+Both ship as a Filter input and Rerank toggle on the web Search page and as
+`filter` / `rerank` params on the MCP search tools.
+`$where`/`$function`/`$accumulator`/`$text`/`$expr` are rejected in filters;
+invalid filters error loudly (exit 2 on the CLI, HTTP 400 in the web UI). A
+reranking bonus: scores become comparable across collections, even ones
+embedded with different models.
+
+## Hybrid search
+
+Combine semantic similarity with keyword matching. Useful when a query
+mixes meaning and specific terms — e.g. *"MongoDB 7.0 replica set issues"*
+benefits from semantic (catches "replica set" → "replication") plus keyword
+(anchors on "7.0").
 
 ```bash
 mongosemantic search "MongoDB 7.0 replica set issues" --hybrid
 ```
 
-CLI flag, web UI toggle, and `hybrid_search` MCP tool are all wired. Atlas
-auto-creates both the vector index and the BM25 search index during
-`apply`. Self-hosted topologies and inline-mode collections fall back to
-pure semantic with a clear notice (no error).
+Works on every topology for shadow-mode collections, via two paths:
+
+- **Atlas with Search indexes** — native `$rankFusion` over `$vectorSearch`
+  plus BM25 `$search`. `apply` auto-creates both indexes, and the search
+  path verifies they actually exist before using `$rankFusion`.
+- **Everywhere else** — self-hosted 7.0+ (standalone or replica set), and
+  Atlas clusters whose Search indexes are cap-blocked (e.g. the free-tier
+  3-index budget): client-side reciprocal-rank fusion. A classic MongoDB
+  `$text` index on the shadow's chunk text (created during `apply`, or
+  lazily on the first hybrid search for existing collections) supplies the
+  keyword leg, the vector leg uses HNSW when available, and the two are
+  fused with the same 1/(60+rank), 0.6/0.4 weighting as `$rankFusion`.
+
+CLI flag, web UI toggle, and `hybrid_search` MCP tool are all wired.
+Inline-mode collections fall back to pure semantic with a clear notice
+(no error).
 
 ## MCP — let Claude Desktop / Cursor query your MongoDB
 
@@ -114,9 +152,9 @@ Eleven tools are exposed:
 
 | Tool | What it does |
 |---|---|
-| `semantic_search` | Find rows in one collection by meaning |
-| `hybrid_search` | Semantic + BM25 fused via Atlas `$rankFusion`; falls back to semantic with a notice elsewhere |
-| `search_all_collections` | Cross-collection fanout, merged by score |
+| `semantic_search` | Find rows in one collection by meaning; optional `filter` (MongoDB query) and `rerank` params |
+| `hybrid_search` | Semantic + keyword, fused via Atlas `$rankFusion` or client-side RRF on every other topology; takes `filter` / `rerank` too |
+| `search_all_collections` | Cross-collection fanout, merged by score; `rerank` makes scores comparable across models |
 | `list_collections` | Every collection + its configured/not-configured status |
 | `list_configured` | Just the ones with semantic search wired up |
 | `inspect_collection` | Field-by-field suitability scoring |
@@ -126,7 +164,7 @@ Eleven tools are exposed:
 | `get_schema_context` | Compact schema summary for AI-generated aggregations |
 | `migrate_model` | Switch a collection's embedding model with near-zero downtime |
 
-## Status (v0.8.2)
+## Status (v0.9.0)
 
 - [x] Connect to Atlas / replica set / standalone — saved connection shared by UI, CLI, and MCP server
 - [x] Inspect a collection, score fields for suitability
@@ -140,7 +178,9 @@ Eleven tools are exposed:
 - [x] **Embedded worker** — `mongosemantic ui` alone keeps embeddings in sync; no second terminal
 - [x] **Self-healing job queue** — stale in-flight jobs reclaimed, dead worker heartbeats pruned automatically
 - [x] **MCP server** for Claude Desktop / Cursor / any MCP client (stdio + SSE)
-- [x] **Atlas hybrid search** — semantic + keyword via `$rankFusion` (`--hybrid` / UI toggle / `hybrid_search` MCP tool), live-verified on Atlas 8.0.24
+- [x] **Hybrid search on every topology** — Atlas `$rankFusion` (live-verified on 8.0.24) or client-side RRF with a `$text` index elsewhere (`--hybrid` / UI toggle / `hybrid_search` MCP tool)
+- [x] **Metadata filtering** — plain MongoDB queries over source fields on every search path (`--filter` / UI input / MCP `filter` param), no reindex needed
+- [x] **Local cross-encoder reranking** — two-stage retrieval with `ms-marco-MiniLM-L-6-v2` (`--rerank` / UI toggle / MCP `rerank` param)
 - [x] **Online model migration** — `mongosemantic migrate` + `migrate_model` MCP tool, atomic `renameCollection` swap
 - [x] **Visualize page** — K-means clusters over a 2D PCA projection, TF-IDF keyword labels, click-to-inspect
 - [x] **Search & query export** — CSV / JSONL / JSON from the search page, CSV / JSON from the aggregation runner
@@ -149,13 +189,19 @@ Eleven tools are exposed:
 
 - **Free-tier Atlas (M0/M2/M5) caps search indexes at 3 per cluster.**
   Each shadow-mode field costs 2 (vectorSearch + BM25), each inline field 1.
-  `apply` and `migrate` detect the cap and degrade gracefully (hybrid falls
-  back to pure semantic). The Atlas paths — `$vectorSearch`, hybrid
-  `$rankFusion`, migration index carry-over — are live-verified against a
-  free-tier M0 on MongoDB 8.0.24; see
+  `apply` and `migrate` detect the cap and degrade gracefully — cap-blocked
+  collections keep hybrid search via client-side RRF over a classic `$text`
+  index, so keyword matching survives the cap. The Atlas paths —
+  `$vectorSearch`, hybrid `$rankFusion`, migration index carry-over — are
+  live-verified against a free-tier M0 on MongoDB 8.0.24; see
   [`docs/atlas-setup.md`](docs/atlas-setup.md) for the runbook. Inline-mode
   with a real Atlas vector index is the one path verified only through its
   brute-force fallback (the M0 cap leaves it no index slot).
+- **Atlas-path filters are over-fetch + post-match.** On `$vectorSearch`
+  paths a `--filter` is applied after the source `$lookup`, over a ×5
+  over-fetched candidate set — a highly selective filter may return fewer
+  than `limit` rows. Local paths (brute-force, embedded HNSW) pre-filter
+  the matching `_id`s and are exact.
 
 ## Embedding models
 

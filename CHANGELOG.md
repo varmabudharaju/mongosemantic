@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.9.0 — 2026-06-10
+
+Search-quality release: metadata filters, local cross-encoder
+reranking, and hybrid search on every topology — not just Atlas.
+
+- **Metadata filtering on every search path.** `search "..." --filter
+  '{"year": {"$gte": 1960}}'` (CLI), a Filter input on the web Search
+  page, and a `filter` param on the `semantic_search` / `hybrid_search`
+  MCP tools. Filters are plain MongoDB queries against source-document
+  fields and need no reindex. Local paths (brute-force, HNSW)
+  pre-filter matching `_id`s — exact; Atlas `$vectorSearch` paths
+  over-fetch ×5 and post-match after the source `$lookup`, so a highly
+  selective filter can return fewer than `limit` rows there.
+  `$where`/`$function`/`$accumulator`/`$text`/`$expr` are rejected;
+  invalid filters exit 2 (CLI), return 400 (web), or raise (MCP) —
+  including operators MongoDB itself rejects at runtime.
+- **Local cross-encoder reranking.** `--rerank` (CLI), a Rerank toggle
+  (web), and a `rerank` param on the MCP search tools (including
+  `search_all_collections`). Two-stage retrieval: over-fetch limit×5
+  candidates, re-score with `cross-encoder/ms-marco-MiniLM-L-6-v2`
+  (~80 MB, local CPU, lazy-loaded once per process), return the top
+  limit. Rows keep the original score as `vector_score` and gain
+  `reranked: true`. Degrades gracefully with a notice if the model
+  can't load; the web UI caps reranking at limit ≤ 1000. Bonus:
+  reranked scores are comparable across collections embedded with
+  different models.
+- **Hybrid search everywhere** — previously Atlas-only. Shadow-mode
+  collections on any topology (7.0+ standalone, replica set, Atlas)
+  now take `--hybrid`. Non-Atlas — and Atlas with cap-blocked Search
+  indexes, e.g. the M0 3-index budget — use client-side
+  reciprocal-rank fusion: a classic Mongo `$text` index on the
+  shadow's `chunk_text` (created at apply time, or lazily on the first
+  hybrid search of an existing collection) plus the vector leg (HNSW
+  when available), fused with the same 1/(60+rank), 0.6/0.4 weighting
+  as `$rankFusion`. The Atlas native path now verifies both Search
+  indexes actually exist before using `$rankFusion` and falls back to
+  client-side RRF otherwise — removing both the old "Atlas + shadow
+  only" asterisk and the M0-cap dead end.
+- **Web UI: score bars normalized per result set.** RRF (~0.016) and
+  rerank scores no longer render as invisible 1–2% slivers — the best
+  result fills the bar, the worst gets 5%.
+
 ## 0.8.2 — 2026-06-09
 
 Atlas live-verification release. Every Atlas-only path was exercised
