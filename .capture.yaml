@@ -3,7 +3,9 @@ output:
   version: v1
 
 app:
-  command: "mongosemantic ui"
+  # Dedicated capture port — 8080 (the app default) is often held by other
+  # local tooling; a separate port keeps `capture run` reproducible.
+  command: "mongosemantic ui --port 8089"
   cwd: .
   ready:
     # Gate on the warmup log line, not just HTTP 200 — loading the HNSW
@@ -17,7 +19,7 @@ shots:
 
   - name: connection
     kind: web
-    url: http://127.0.0.1:8080/#/connection
+    url: http://127.0.0.1:8089/#/connection
     viewport: { width: 1280, height: 800 }
     full_page: true
     alt: "Connection page — connected to a self-hosted replica set with topology detection, saved-connection card, and developer help"
@@ -27,7 +29,7 @@ shots:
 
   - name: collections
     kind: web
-    url: http://127.0.0.1:8080/#/collections
+    url: http://127.0.0.1:8089/#/collections
     viewport: { width: 1280, height: 800 }
     full_page: true
     alt: "Collections browser — movies and wines configured with model + storage mode, other collections one click from setup"
@@ -37,7 +39,7 @@ shots:
 
   - name: inspect
     kind: web
-    url: http://127.0.0.1:8080/#/inspect/movies
+    url: http://127.0.0.1:8089/#/inspect/movies
     viewport: { width: 1280, height: 800 }
     full_page: true
     alt: "Inspect page — every field of the movies collection scored for semantic-search suitability, with sample documents below"
@@ -47,7 +49,7 @@ shots:
 
   - name: indexing
     kind: web
-    url: http://127.0.0.1:8080/#/indexing/movies
+    url: http://127.0.0.1:8089/#/indexing/movies
     viewport: { width: 1280, height: 800 }
     full_page: true
     alt: "Indexing dashboard — completed/in-flight/pending/failed tiles, live worker dot, per-field progress, recent activity feed"
@@ -57,7 +59,7 @@ shots:
 
   - name: search
     kind: web
-    url: http://127.0.0.1:8080/#/search/movies
+    url: http://127.0.0.1:8089/#/search/movies
     viewport: { width: 1280, height: 800 }
     full_page: true
     alt: "Semantic search — natural-language query over 23k movie plots with scores, score bars, stats line, and CSV/JSONL/JSON export"
@@ -72,7 +74,7 @@ shots:
 
   - name: search-detail
     kind: web
-    url: http://127.0.0.1:8080/#/search/movies
+    url: http://127.0.0.1:8089/#/search/movies
     viewport: { width: 1280, height: 800 }
     full_page: false
     alt: "Click any search result to slide in the full source document"
@@ -88,7 +90,7 @@ shots:
 
   - name: query
     kind: web
-    url: http://127.0.0.1:8080/#/query
+    url: http://127.0.0.1:8089/#/query
     viewport: { width: 1280, height: 800 }
     full_page: true
     alt: "Read-only aggregation runner — quick examples, table/JSON view toggle, stats line, CSV/JSON export; $out/$merge/$function blocked"
@@ -101,7 +103,7 @@ shots:
 
   - name: visualize
     kind: web
-    url: http://127.0.0.1:8080/#/visualize
+    url: http://127.0.0.1:8089/#/visualize
     viewport: { width: 1280, height: 800 }
     full_page: true
     alt: "Explore embeddings — 2D PCA scatter of sampled embeddings with K-means clusters, TF-IDF keyword labels, click-to-highlight"
@@ -111,7 +113,7 @@ shots:
 
   - name: dashboard
     kind: web
-    url: http://127.0.0.1:8080/#/dashboard
+    url: http://127.0.0.1:8089/#/dashboard
     viewport: { width: 1280, height: 800 }
     full_page: true
     alt: "Overview dashboard — topology, embedding totals, job-queue health, per-collection indexing activity, live workers"
@@ -121,7 +123,7 @@ shots:
 
   - name: mcp
     kind: web
-    url: http://127.0.0.1:8080/#/mcp
+    url: http://127.0.0.1:8089/#/mcp
     viewport: { width: 1280, height: 800 }
     full_page: true
     alt: "MCP page — one command wires mongosemantic into Claude Desktop; eleven tools exposed to any MCP client"
@@ -163,7 +165,7 @@ shots:
 
   - name: apply
     kind: web
-    url: http://127.0.0.1:8080/#/apply/movies
+    url: http://127.0.0.1:8089/#/apply/movies
     viewport: { width: 1280, height: 800 }
     full_page: true
     alt: "Configure semantic search — discovered fields as checkboxes, shadow/inline mode, chunking toggle, embedding model picker"
@@ -173,7 +175,7 @@ shots:
 
   - name: migrate-modal
     kind: web
-    url: http://127.0.0.1:8080/#/collections
+    url: http://127.0.0.1:8089/#/collections
     viewport: { width: 1280, height: 800 }
     full_page: false
     alt: "Migrate model — per-collection embedding-model swap with near-zero downtime; old shadow kept as an archive for rollback"
@@ -182,3 +184,72 @@ shots:
       - { click: "a[data-migrate='movies']" }
       - { wait_for: "#migrate-model" }
       - { wait_ms: 400 }
+
+  # ---- 0.9.0: metadata filters, rerank, hybrid everywhere ----
+
+  - name: search-filter
+    kind: web
+    url: http://127.0.0.1:8089/#/search/movies
+    viewport: { width: 1280, height: 800 }
+    full_page: true
+    alt: "Metadata filtering — the same noir query constrained to year < 1960 with a plain MongoDB filter; only pre-1960 classics return"
+    steps:
+      - { wait_for: "#search-q" }
+      - { fill: ["#search-filter", "{\"year\": {\"$lt\": 1960}}"] }
+      - { fill: ["#search-q", "a detective hunting a serial killer"] }
+      - { fill: ["#search-limit", "5"] }
+      - { click: "#search-go" }
+      - { wait_for: "#search-results li" }
+      - { wait_ms: 2500 }
+
+  - name: search-rerank
+    kind: web
+    url: http://127.0.0.1:8089/#/search/movies
+    viewport: { width: 1280, height: 800 }
+    full_page: true
+    alt: "Cross-encoder reranking — top candidates re-scored locally; every hit carries a reranked badge and bars are normalized per result set"
+    steps:
+      - { wait_for: "#search-q" }
+      - { click: "#search-rerank" }
+      - { fill: ["#search-q", "a washed-up boxer gets one last shot at redemption"] }
+      - { fill: ["#search-limit", "5"] }
+      - { click: "#search-go" }
+      - { wait_for: "#search-results li" }
+      # First rerank request also loads the cross-encoder; settle generously.
+      - { wait_ms: 4000 }
+
+  - name: search-hybrid-local
+    kind: web
+    url: http://127.0.0.1:8089/#/search/movies
+    viewport: { width: 1280, height: 800 }
+    full_page: true
+    alt: "Hybrid search on a self-hosted replica set — semantic + $text keyword legs fused with client-side RRF; no Atlas required"
+    steps:
+      - { wait_for: "#search-q" }
+      - { click: "#search-hybrid" }
+      - { fill: ["#search-q", "Godzilla attacks a city"] }
+      - { fill: ["#search-limit", "5"] }
+      - { click: "#search-go" }
+      - { wait_for: "#search-results li" }
+      - { wait_ms: 6000 }
+
+  - name: cli-search-filter
+    kind: cli
+    command: "mongosemantic search \"a detective hunting a serial killer\" -c movies --limit 4 --filter '{\"year\": {\"$lt\": 1960}}'"
+    cols: 100
+    rows: 22
+    alt: "CLI metadata filtering — --filter applies a MongoDB query to source documents; the same search returns only pre-1960 noir"
+
+  - name: cli-search-rerank
+    kind: cli
+    command: "mongosemantic search \"a washed-up boxer gets one last shot at redemption\" -c movies --limit 4 --rerank"
+    cols: 100
+    rows: 22
+    alt: "CLI reranking — --rerank re-scores the top candidates with a local cross-encoder; the best-matching plot wins decisively"
+
+  - name: cli-search-hybrid
+    kind: cli
+    command: "mongosemantic search \"Godzilla attacks a city\" -c movies --limit 4 --hybrid"
+    cols: 100
+    rows: 20
+    alt: "CLI hybrid search on a local replica set — keyword leg anchors on the term, vector leg adds meaning, fused client-side with RRF"

@@ -111,6 +111,13 @@ invalid filters error loudly (exit 2 on the CLI, HTTP 400 in the web UI). A
 reranking bonus: scores become comparable across collections, even ones
 embedded with different models.
 
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/v1/17-search-filter.png" width="100%" alt="Metadata filtering — the same noir query constrained to year < 1960 with a plain MongoDB filter; only pre-1960 classics return"/></td>
+    <td width="50%"><img src="docs/screenshots/v1/18-search-rerank.png" width="100%" alt="Cross-encoder reranking — top candidates re-scored locally; every hit carries a reranked badge and bars are normalized per result set"/></td>
+  </tr>
+</table>
+
 ## Hybrid search
 
 Combine semantic similarity with keyword matching. Useful when a query
@@ -138,6 +145,8 @@ Works on every topology for shadow-mode collections, via two paths:
 CLI flag, web UI toggle, and `hybrid_search` MCP tool are all wired.
 Inline-mode collections fall back to pure semantic with a clear notice
 (no error).
+
+<img src="docs/screenshots/v1/19-search-hybrid-local.png" width="100%" alt="Hybrid search on a self-hosted replica set — semantic + $text keyword legs fused with client-side RRF; no Atlas required"/>
 
 ## MCP — let Claude Desktop / Cursor query your MongoDB
 
