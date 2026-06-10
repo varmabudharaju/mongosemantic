@@ -61,6 +61,10 @@ The dashboard provides:
     <td width="50%"><img src="docs/screenshots/v1/07-query.png" width="100%" alt="Read-only aggregation runner — quick examples, table view, stats line, CSV/JSON export"/></td>
     <td width="50%"><img src="docs/screenshots/v1/06-search-detail.png" width="100%" alt="Click any search result to slide in the full source document"/></td>
   </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/v1/15-apply.png" width="100%" alt="Configure semantic search — discovered fields as checkboxes with suitability badges, shadow/inline mode, chunking, model picker"/></td>
+    <td width="50%"><img src="docs/screenshots/v1/16-migrate-modal.png" width="100%" alt="Migrate model — per-collection embedding-model swap with near-zero downtime; the old shadow is archived for rollback"/></td>
+  </tr>
 </table>
 
 ## Online model migration

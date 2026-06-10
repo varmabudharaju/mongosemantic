@@ -158,3 +158,27 @@ shots:
     cols: 100
     rows: 30
     alt: "CLI status — topology, configured collections, job queue counts, worker heartbeats"
+
+  # ---- Appended after the first release so 01-14 keep their numbers ----
+
+  - name: apply
+    kind: web
+    url: http://127.0.0.1:8080/#/apply/movies
+    viewport: { width: 1280, height: 800 }
+    full_page: true
+    alt: "Configure semantic search — discovered fields as checkboxes, shadow/inline mode, chunking toggle, embedding model picker"
+    steps:
+      - { wait_for: "#apply-model" }
+      - { wait_ms: 500 }
+
+  - name: migrate-modal
+    kind: web
+    url: http://127.0.0.1:8080/#/collections
+    viewport: { width: 1280, height: 800 }
+    full_page: false
+    alt: "Migrate model — per-collection embedding-model swap with near-zero downtime; old shadow kept as an archive for rollback"
+    steps:
+      - { wait_for: "#collections-table td" }
+      - { click: "a[data-migrate='movies']" }
+      - { wait_for: "#migrate-model" }
+      - { wait_ms: 400 }
