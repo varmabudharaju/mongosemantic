@@ -19,7 +19,7 @@ def reindex_cmd(
     """Force re-embedding of every document in a collection."""
     if not yes:
         typer.confirm(f"Force re-embed every document in {collection}?", abort=True)
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
         db = conn.db

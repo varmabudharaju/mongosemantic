@@ -1319,7 +1319,10 @@
           empty.textContent = c.empty_no_query; return;
         }
         const goBtn = $("#search-go");
-        const origLabel = goBtn.textContent;
+        // Restore to the pristine label, never to a snapshot taken mid-run:
+        // two overlapping runs (click + debounced filter rerun) would each
+        // capture the other's "Searching…" and leave the button stuck.
+        const origLabel = goBtn.dataset.label || (goBtn.dataset.label = goBtn.textContent);
         goBtn.textContent = "Searching…";
         goBtn.disabled = true;
         const params = new URLSearchParams({ q, limit: limitInput.value });
@@ -1813,7 +1816,6 @@
       $("#viz-refresh").onclick = render;
       await render();
     },
-    mcp() { },
   };
 
   // Bootstrap

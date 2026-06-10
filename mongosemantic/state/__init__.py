@@ -26,6 +26,7 @@ from mongosemantic.state.job_queue import (
     fail,
     recent_failed_jobs,
     recent_jobs,
+    requeue_stale,
     reset_failed,
 )
 from mongosemantic.state.resume_tokens import (
@@ -50,6 +51,7 @@ __all__ = [
     "complete",
     "fail",
     "reset_failed",
+    "requeue_stale",
     "recent_failed_jobs",
     "count_by_status",
     "count_by_collection",

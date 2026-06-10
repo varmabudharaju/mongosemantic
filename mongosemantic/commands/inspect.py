@@ -24,7 +24,7 @@ def inspect_cmd(
     sample: int = typer.Option(500, "--sample"),
 ) -> None:
     """Sample a collection and score each field for semantic-search suitability."""
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
         stats = inspect_collection(conn.db[collection], sample_size=sample)

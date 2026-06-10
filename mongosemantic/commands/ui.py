@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import typer
 import uvicorn
 from rich.console import Console
@@ -41,6 +43,16 @@ def ui_cmd(
             factory=True,
         )
         return
+    # uvicorn's default log config only attaches handlers to uvicorn.*
+    # loggers, so mongosemantic.* lines (HNSW warmup, embedded worker,
+    # background errors) would vanish silently. Give our logger family its
+    # own stderr handler without touching the root logger.
+    ms_log = logging.getLogger("mongosemantic")
+    if not ms_log.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s - %(message)s"))
+        ms_log.addHandler(handler)
+        ms_log.setLevel(logging.INFO)
     # Build the app first so we can hand its provider cache to the embedded
     # worker — worker and search end up sharing one SentenceTransformer
     # instance per process instead of each loading their own.

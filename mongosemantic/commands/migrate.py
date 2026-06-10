@@ -28,7 +28,7 @@ def migrate_cmd(
     (`{shadow}_archive_{ts}`) you can drop later, or pass `--drop-archive`
     to drop it as part of the same command.
     """
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
         with Progress(

@@ -8,7 +8,7 @@ from rich.console import Console
 
 from mongosemantic.config import Settings
 from mongosemantic.db.client import MongoConnection, Topology
-from mongosemantic.state import ensure_indexes, list_configured
+from mongosemantic.state import ensure_indexes, list_configured, prune_dead, requeue_stale
 from mongosemantic.sync.change_stream import ChangeStreamListener
 from mongosemantic.sync.polling import poll_once
 from mongosemantic.worker.runner import ProviderRegistry, WorkerRunner, process_batch
@@ -41,6 +41,10 @@ def run_worker(poll_interval: int, batch_size: int, once: bool = False) -> None:
         # One-shot run: process all pending jobs, then exit. Skips change
         # streams / polling / heartbeat. Useful for cron, scripted demos,
         # or quick ad-hoc catch-up runs.
+        requeued = requeue_stale(db)
+        if requeued:
+            console.print(f"[yellow]Requeued {requeued} stale in-flight job(s).[/yellow]")
+        prune_dead(db)
         if conn.topology == Topology.STANDALONE:
             for cfg in list_configured(db):
                 poll_once(db, cfg.collection)

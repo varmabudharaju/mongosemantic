@@ -18,7 +18,7 @@ def retry_cmd(
     if not all_ and not collection:
         console.print("[red]Pass --all or --collection.[/red]")
         raise typer.Exit(code=1)
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
         n = reset_failed(conn.db)

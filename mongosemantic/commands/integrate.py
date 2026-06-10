@@ -62,7 +62,7 @@ def integrate_cmd(
     if target != "claude":
         raise typer.BadParameter(f"unknown target {target!r}; currently only 'claude' is supported")
 
-    settings = Settings()
+    settings = Settings.from_environment()
     if not settings.uri:
         console.print("[red]MONGOSEMANTIC_URI is not set. Set it (or put it in .env) before integrating.[/red]")
         raise typer.Exit(code=1)

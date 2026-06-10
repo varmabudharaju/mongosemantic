@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from pymongo import ASCENDING
@@ -107,6 +107,23 @@ def claim_batch(db: Database, worker_id: str, limit: int) -> list[dict]:
             break
         claimed.append(doc)
     return claimed
+
+
+def requeue_stale(db: Database, older_than_seconds: int = 600) -> int:
+    """Return in_flight jobs whose worker died mid-batch back to pending.
+
+    A job is stranded when a worker claims it and then crashes before
+    complete()/fail() runs — nothing else ever touches it again. Workers
+    call this on startup and periodically so a crashed run never
+    permanently loses jobs. The cutoff is generous: a healthy batch
+    completes in seconds, so anything in_flight for 10 minutes is dead.
+    """
+    cutoff = _utcnow() - timedelta(seconds=older_than_seconds)
+    r = db[JOBS_COLLECTION].update_many(
+        {"status": "in_flight", "started_at": {"$lt": cutoff}},
+        {"$set": {"status": "pending", "owner": None, "started_at": None}},
+    )
+    return r.modified_count
 
 
 def complete(db: Database, job_id: Any) -> None:

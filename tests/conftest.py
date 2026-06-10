@@ -3,6 +3,14 @@ import os
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _isolate_connection_store(tmp_path, monkeypatch):
+    # CLI commands fall back to the saved connection file under
+    # $XDG_CONFIG_HOME/mongosemantic/config.json. Point XDG at a per-test
+    # directory so a developer's real saved connection never leaks into tests.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+
+
 def pytest_configure(config):
     config.addinivalue_line("markers", "integration: requires docker compose (see README)")
 

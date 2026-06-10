@@ -17,11 +17,14 @@ from mongosemantic.state import (
     complete,
     fail,
     load_config,
+    prune_dead,
     remove_heartbeat,
+    requeue_stale,
     write_heartbeat,
 )
 
 HEARTBEAT_INTERVAL_S = 10.0
+MAINTENANCE_INTERVAL_S = 60.0
 
 log = logging.getLogger("mongosemantic.worker")
 
@@ -270,6 +273,7 @@ class WorkerRunner:
         self._started_at = _utcnow()
         self._jobs_processed = 0
         self._last_heartbeat = 0.0
+        self._last_maintenance = 0.0
 
     def stop(self) -> None:
         self._stop.set()
@@ -289,9 +293,25 @@ class WorkerRunner:
                 log.exception("heartbeat write failed for %s", self.worker_id)
             self._last_heartbeat = now
 
+    def _maybe_maintain(self) -> None:
+        """Queue hygiene: requeue jobs stranded in_flight by a dead worker
+        and drop heartbeats nobody will ever update again."""
+        now = time.monotonic()
+        if now - self._last_maintenance < MAINTENANCE_INTERVAL_S:
+            return
+        try:
+            n = requeue_stale(self.db)
+            if n:
+                log.info("requeued %d stale in-flight job(s)", n)
+            prune_dead(self.db)
+        except Exception:
+            log.exception("queue maintenance failed")
+        self._last_maintenance = now
+
     def run(self) -> None:
         log.info("worker %s starting", self.worker_id)
         self._maybe_heartbeat()
+        self._maybe_maintain()
         while not self._stop.is_set():
             n = process_batch(
                 self.db, self.provider, self.worker_id, self.batch_size,
@@ -299,6 +319,7 @@ class WorkerRunner:
             )
             self._jobs_processed += n
             self._maybe_heartbeat()
+            self._maybe_maintain()
             self._maybe_rebuild_hnsw()
             if n == 0:
                 time.sleep(self.idle_sleep)

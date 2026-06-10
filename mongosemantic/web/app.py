@@ -70,6 +70,12 @@ def _spawn_hnsw_warmup(app: FastAPI) -> None:
                 conn.close()
         except Exception:
             log.exception("HNSW warmup thread crashed")
+        finally:
+            # Operational signal: loading/building large indexes contends
+            # with request handling, so "warmup finished" marks the moment
+            # the server is fully responsive. Scripts (and the capture
+            # tooling) key off this line.
+            log.info("HNSW warmup finished")
 
     threading.Thread(target=_run, name="hnsw-warmup", daemon=True).start()
 

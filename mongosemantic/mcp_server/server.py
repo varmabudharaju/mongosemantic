@@ -26,7 +26,7 @@ def create_mcp() -> FastMCP:
     )
 
     def _open():
-        s = Settings()
+        s = Settings.from_environment()
         return MongoConnection.open(s.uri, s.database)
 
     @app.tool()

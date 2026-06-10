@@ -17,7 +17,7 @@ def index_cmd(
     batch_size: int = typer.Option(500, "--batch-size"),
 ) -> None:
     """Enqueue embed jobs for every existing document in a configured collection."""
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
         db = conn.db

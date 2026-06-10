@@ -1,12 +1,16 @@
+from datetime import datetime, timedelta, timezone
+
 import mongomock
 
 from mongosemantic.state.job_queue import (
+    JOBS_COLLECTION,
     claim_batch,
     complete,
     count_by_status,
     enqueue_delete_all,
     enqueue_embed,
     fail,
+    requeue_stale,
     reset_failed,
 )
 
@@ -85,3 +89,30 @@ def test_enqueue_delete_all():
     enqueue_delete_all(db, "articles", "doc1")
     batch = claim_batch(db, "w1", 10)
     assert batch[0]["kind"] == "delete"
+
+
+def test_requeue_stale_returns_old_in_flight_to_pending():
+    db = _db()
+    enqueue_embed(db, "c", "id1", "body", 0, "t", "h", "local-fast")
+    claim_batch(db, "w1", 10)
+    # Backdate the claim as if the worker died 20 minutes ago.
+    db[JOBS_COLLECTION].update_many(
+        {"status": "in_flight"},
+        {"$set": {"started_at": datetime.now(timezone.utc) - timedelta(minutes=20)}},
+    )
+    assert requeue_stale(db, older_than_seconds=600) == 1
+    counts = count_by_status(db)
+    assert counts.get("pending", 0) == 1
+    assert counts.get("in_flight", 0) == 0
+    job = db[JOBS_COLLECTION].find_one({})
+    assert job["owner"] is None
+    assert job["started_at"] is None
+
+
+def test_requeue_stale_leaves_fresh_in_flight_alone():
+    db = _db()
+    enqueue_embed(db, "c", "id1", "body", 0, "t", "h", "local-fast")
+    claim_batch(db, "w1", 10)
+    assert requeue_stale(db, older_than_seconds=600) == 0
+    counts = count_by_status(db)
+    assert counts.get("in_flight", 0) == 1

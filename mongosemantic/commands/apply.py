@@ -37,7 +37,7 @@ def apply_cmd(
     model: str | None = typer.Option(None, "--model"),
 ) -> None:
     """Configure semantic search on a collection."""
-    settings = Settings()
+    settings = Settings.from_environment()
     chosen_model = model or settings.model
     if chosen_model not in MODEL_DIMS:
         raise typer.BadParameter(f"Unknown model: {chosen_model}")

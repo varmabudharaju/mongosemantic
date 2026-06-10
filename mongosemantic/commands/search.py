@@ -123,7 +123,7 @@ def search_cmd(
         help="Combine semantic + keyword search (Atlas + shadow mode only)."),
 ) -> None:
     """Search by meaning. Omit --collection to search all configured collections."""
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
         db = conn.db

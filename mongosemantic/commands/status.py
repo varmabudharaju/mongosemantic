@@ -18,7 +18,7 @@ console = Console()
 def status_cmd() -> None:
     """Print health overview: topology, configured collections, job counts,
     worker heartbeats, and recently failed jobs."""
-    settings = Settings()
+    settings = Settings.from_environment()
     conn = MongoConnection.open(settings.uri, settings.database)
     try:
         db = conn.db
